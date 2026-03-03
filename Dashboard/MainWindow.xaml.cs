@@ -1668,6 +1668,7 @@ namespace PerformanceMonitorDashboard
 
         private const string PlanAddTabId = "__PLAN_ADD_TAB__";
         private TabControl? _mainPlanTabControl;
+        private Grid? _planViewerContainer;
 
         private void OpenPlanViewer_Click(object sender, RoutedEventArgs e)
         {
@@ -1675,6 +1676,7 @@ namespace PerformanceMonitorDashboard
             {
                 AddNewEmptyPlanSubTab();
                 ServerTabControl.SelectedItem = _planViewerTab;
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => _planViewerContainer?.Focus()));
                 return;
             }
             OpenPlanViewerTab();
@@ -1723,10 +1725,12 @@ namespace PerformanceMonitorDashboard
 
             var container = new Grid();
             container.AllowDrop = true;
+            container.Focusable = true;
             container.DragOver += MainWindowPlanViewer_DragOver;
             container.Drop += MainWindowPlanViewer_Drop;
             container.KeyDown += MainWindowPlanViewer_KeyDown;
             container.Children.Add(_mainPlanTabControl);
+            _planViewerContainer = container;
 
             var header = new StackPanel { Orientation = Orientation.Horizontal };
             header.Children.Add(new TextBlock
@@ -1755,6 +1759,7 @@ namespace PerformanceMonitorDashboard
 
             // Open the first empty sub-tab immediately
             AddNewEmptyPlanSubTab();
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => _planViewerContainer?.Focus()));
         }
 
         /// <summary>

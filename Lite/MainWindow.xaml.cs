@@ -1466,6 +1466,7 @@ public partial class MainWindow : Window
                 MainWindowPlanViewerTab.IsSelected = true;
                 AddNewEmptyPlanSubTab();
             }
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => MainWindowPlanTabControl.Focus()));
         }
 
         private void MainWindowPlanViewerClose_Click(object sender, RoutedEventArgs e)
