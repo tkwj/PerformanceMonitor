@@ -220,6 +220,7 @@ LIMIT 3";
         string miscWaitsFilter = excludeMiscWaits
             ? "AND r.wait_type NOT IN (N'XE_LIVE_TARGET_TVF')" : "";
 
+
         command.CommandText = @$"
                 SELECT
                     r.session_id,
