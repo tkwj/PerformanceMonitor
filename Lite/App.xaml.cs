@@ -324,6 +324,16 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        /* Silently swallow Hardcodet TrayToolTip race condition (issue #422).
+           The crash occurs in Popup.CreateWindow when showing the custom visual tooltip
+           and is harmless — the tooltip simply doesn't show that one time. */
+        if (IsTrayToolTipCrash(e.Exception))
+        {
+            AppLogger.Warn("Dispatcher", "Suppressed Hardcodet TrayToolTip crash (issue #422)");
+            e.Handled = true;
+            return;
+        }
+
         AppLogger.Error("Dispatcher", "Unhandled exception", e.Exception);
         AppLogger.Flush();
 
@@ -342,6 +352,16 @@ public partial class App : Application
         AppLogger.Error("Task", "Unobserved task exception", e.Exception);
         AppLogger.Flush();
         e.SetObserved(); /* Prevent process termination */
+    }
+
+    /// <summary>
+    /// Detects the Hardcodet TrayToolTip race condition crash (issue #422).
+    /// </summary>
+    private static bool IsTrayToolTipCrash(Exception ex)
+    {
+        return ex is System.ArgumentException
+            && ex.Message.Contains("VisualTarget")
+            && ex.StackTrace?.Contains("TaskbarIcon") == true;
     }
 
     private static string FormatExceptionDetails(Exception? ex)
