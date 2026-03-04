@@ -25,6 +25,7 @@ public class SystemTrayService : IDisposable
     private readonly CollectionBackgroundService? _backgroundService;
     private bool _disposed;
     private MenuItem? _pauseResumeItem;
+    private TextBlock? _tooltipText;
 
     public SystemTrayService(Window mainWindow, CollectionBackgroundService? backgroundService = null)
     {
@@ -42,10 +43,33 @@ public class SystemTrayService : IDisposable
 
         _trayIcon = new TaskbarIcon();
 
-        /* Use plain string tooltip to avoid Hardcodet TrayToolTip crash (issue #422).
-           Custom visual tooltips trigger a race condition in Popup.CreateWindow
-           that throws "The root Visual of a VisualTarget cannot have a parent." */
-        _trayIcon.ToolTipText = "Performance Monitor Lite";
+        bool HasLightBackground = Helpers.ThemeManager.HasLightBackground;
+
+        /* Custom tooltip styled to match current theme.
+           Note: Hardcodet TrayToolTip can rarely trigger a race condition in Popup.CreateWindow
+           that throws "The root Visual of a VisualTarget cannot have a parent." (issue #422).
+           The DispatcherUnhandledException handler silently swallows this specific crash. */
+        _tooltipText = new TextBlock
+        {
+            Text = "Performance Monitor Lite",
+            Foreground = new SolidColorBrush(HasLightBackground
+                ? (Color)ColorConverter.ConvertFromString("#1A1D23")
+                : (Color)ColorConverter.ConvertFromString("#E4E6EB")),
+            FontSize = 12
+        };
+        _trayIcon.TrayToolTip = new Border
+        {
+            Background = new SolidColorBrush(HasLightBackground
+                ? (Color)ColorConverter.ConvertFromString("#FFFFFF")
+                : (Color)ColorConverter.ConvertFromString("#22252b")),
+            BorderBrush = new SolidColorBrush(HasLightBackground
+                ? (Color)ColorConverter.ConvertFromString("#DEE2E6")
+                : (Color)ColorConverter.ConvertFromString("#33363e")),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(4),
+            Child = _tooltipText
+        };
 
         /* Load icon */
         try
@@ -114,9 +138,9 @@ public class SystemTrayService : IDisposable
             _pauseResumeItem.Icon = new TextBlock { Text = _backgroundService.IsPaused ? "▶" : "⏸", Background = Brushes.Transparent };
         }
 
-        if (_trayIcon != null)
+        if (_tooltipText != null)
         {
-            _trayIcon.ToolTipText = _backgroundService.IsPaused
+            _tooltipText.Text = _backgroundService.IsPaused
                 ? "Performance Monitor Lite (Paused)"
                 : "Performance Monitor Lite";
         }
