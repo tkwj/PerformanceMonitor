@@ -169,7 +169,7 @@ internal static class EmailTemplateBuilder
         sb.Append($"Sent by {WebUtility.HtmlEncode(EditionName)}");
         if (!isTest)
         {
-            sb.Append(" &middot; 15-minute cooldown between repeat alerts");
+            sb.Append($" &middot; {App.EmailCooldownMinutes}-minute cooldown between repeat alerts");
         }
         sb.Append("</span>");
         sb.Append("</td></tr>");

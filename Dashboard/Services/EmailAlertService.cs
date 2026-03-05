@@ -33,7 +33,6 @@ namespace PerformanceMonitorDashboard.Services
 
         private readonly UserPreferencesService _preferencesService;
         private readonly ConcurrentDictionary<string, DateTime> _cooldowns = new();
-        private static readonly TimeSpan CooldownPeriod = TimeSpan.FromMinutes(15);
 
         /* Alert log — loaded from JSON on startup, saved on exit, new alerts added in-memory */
         private readonly List<AlertLogEntry> _alertLog = new();
@@ -90,7 +89,7 @@ namespace PerformanceMonitorDashboard.Services
 
                 var cooldownKey = $"{serverId}:{metricName}";
                 if (_cooldowns.TryGetValue(cooldownKey, out var lastSent) &&
-                    DateTime.UtcNow - lastSent < CooldownPeriod)
+                    DateTime.UtcNow - lastSent < TimeSpan.FromMinutes(prefs.EmailCooldownMinutes))
                 {
                     return;
                 }

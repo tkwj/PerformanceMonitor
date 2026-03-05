@@ -94,6 +94,8 @@ namespace PerformanceMonitorDashboard.Models
         public int TempDbSpaceThresholdPercent { get; set; } = 80; // Alert when TempDB used > X%
         public bool NotifyOnLongRunningJobs { get; set; } = true;
         public int LongRunningJobMultiplier { get; set; } = 3; // Alert when job runs > Nx historical average
+        public int AlertCooldownMinutes { get; set; } = 5;  // Tray notification cooldown between repeated alerts
+        public int EmailCooldownMinutes { get; set; } = 15; // Email cooldown between repeated alerts
 
         // SMTP email alert settings
         public bool SmtpEnabled { get; set; } = false;

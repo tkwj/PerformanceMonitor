@@ -25,7 +25,6 @@ namespace PerformanceMonitorLite.Services;
 public class EmailAlertService
 {
     private readonly ConcurrentDictionary<string, DateTime> _cooldowns = new();
-    private static readonly TimeSpan CooldownPeriod = TimeSpan.FromMinutes(15);
     private readonly DuckDbInitializer? _duckDb;
 
     /* Failure tracking for louder logging */
@@ -64,7 +63,7 @@ public class EmailAlertService
             {
                 var cooldownKey = $"{serverId}:{metricName}";
                 var withinCooldown = _cooldowns.TryGetValue(cooldownKey, out var lastSent) &&
-                    DateTime.UtcNow - lastSent < CooldownPeriod;
+                    DateTime.UtcNow - lastSent < TimeSpan.FromMinutes(App.EmailCooldownMinutes);
 
                 if (!withinCooldown)
                 {

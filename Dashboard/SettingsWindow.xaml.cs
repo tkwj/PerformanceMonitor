@@ -171,6 +171,8 @@ namespace PerformanceMonitorDashboard
             TempDbSpaceThresholdTextBox.Text = prefs.TempDbSpaceThresholdPercent.ToString(CultureInfo.InvariantCulture);
             NotifyOnLongRunningJobsCheckBox.IsChecked = prefs.NotifyOnLongRunningJobs;
             LongRunningJobMultiplierTextBox.Text = prefs.LongRunningJobMultiplier.ToString(CultureInfo.InvariantCulture);
+            AlertCooldownTextBox.Text = prefs.AlertCooldownMinutes.ToString(CultureInfo.InvariantCulture);
+            EmailCooldownTextBox.Text = prefs.EmailCooldownMinutes.ToString(CultureInfo.InvariantCulture);
 
             UpdateNotificationCheckboxStates();
 
@@ -311,6 +313,8 @@ namespace PerformanceMonitorDashboard
             LongRunningQueryThresholdTextBox.Text = "30";
             TempDbSpaceThresholdTextBox.Text = "80";
             LongRunningJobMultiplierTextBox.Text = "3";
+            AlertCooldownTextBox.Text = "5";
+            EmailCooldownTextBox.Text = "15";
             UpdateAlertPreviewText();
         }
 
@@ -611,6 +615,16 @@ namespace PerformanceMonitorDashboard
                 prefs.LongRunningJobMultiplier = jobMultiplier;
             else if (prefs.NotifyOnLongRunningJobs)
                 validationErrors.Add("Job multiplier must be a positive number");
+
+            if (int.TryParse(AlertCooldownTextBox.Text, out int alertCooldown) && alertCooldown >= 1 && alertCooldown <= 120)
+                prefs.AlertCooldownMinutes = alertCooldown;
+            else
+                validationErrors.Add("Tray notification cooldown must be between 1 and 120 minutes");
+
+            if (int.TryParse(EmailCooldownTextBox.Text, out int emailCooldown) && emailCooldown >= 1 && emailCooldown <= 120)
+                prefs.EmailCooldownMinutes = emailCooldown;
+            else
+                validationErrors.Add("Email alert cooldown must be between 1 and 120 minutes");
 
             if (validationErrors.Count > 0)
             {

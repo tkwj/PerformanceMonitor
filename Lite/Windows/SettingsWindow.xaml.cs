@@ -445,6 +445,8 @@ public partial class SettingsWindow : Window
         AlertTempDbSpaceThresholdBox.Text = App.AlertTempDbSpaceThresholdPercent.ToString();
         AlertLongRunningJobCheckBox.IsChecked = App.AlertLongRunningJobEnabled;
         AlertLongRunningJobMultiplierBox.Text = App.AlertLongRunningJobMultiplier.ToString();
+        AlertCooldownBox.Text = App.AlertCooldownMinutes.ToString();
+        EmailCooldownBox.Text = App.EmailCooldownMinutes.ToString();
         UpdateAlertControlStates();
     }
 
@@ -480,6 +482,10 @@ public partial class SettingsWindow : Window
         App.AlertLongRunningJobEnabled = AlertLongRunningJobCheckBox.IsChecked == true;
         if (int.TryParse(AlertLongRunningJobMultiplierBox.Text, out var jobMult) && jobMult >= 2 && jobMult <= 20)
             App.AlertLongRunningJobMultiplier = jobMult;
+        if (int.TryParse(AlertCooldownBox.Text, out var alertCooldown) && alertCooldown >= 1 && alertCooldown <= 120)
+            App.AlertCooldownMinutes = alertCooldown;
+        if (int.TryParse(EmailCooldownBox.Text, out var emailCooldown) && emailCooldown >= 1 && emailCooldown <= 120)
+            App.EmailCooldownMinutes = emailCooldown;
 
         var settingsPath = Path.Combine(App.ConfigDirectory, "settings.json");
         try
@@ -517,6 +523,8 @@ public partial class SettingsWindow : Window
             root["alert_tempdb_space_threshold_percent"] = App.AlertTempDbSpaceThresholdPercent;
             root["alert_long_running_job_enabled"] = App.AlertLongRunningJobEnabled;
             root["alert_long_running_job_multiplier"] = App.AlertLongRunningJobMultiplier;
+            root["alert_cooldown_minutes"] = App.AlertCooldownMinutes;
+            root["email_cooldown_minutes"] = App.EmailCooldownMinutes;
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             File.WriteAllText(settingsPath, root.ToJsonString(options));
@@ -541,6 +549,8 @@ public partial class SettingsWindow : Window
         AlertLongRunningQueryThresholdBox.Text = "30";
         AlertTempDbSpaceThresholdBox.Text = "80";
         AlertLongRunningJobMultiplierBox.Text = "3";
+        AlertCooldownBox.Text = "5";
+        EmailCooldownBox.Text = "15";
         UpdateAlertPreviewText();
     }
 
