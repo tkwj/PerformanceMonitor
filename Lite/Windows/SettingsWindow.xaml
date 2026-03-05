@@ -210,7 +210,7 @@
                 <TextBlock Text="Exclude databases from alerts (comma-separated):"
                            Foreground="{DynamicResource ForegroundBrush}" Margin="20,0,0,4" FontSize="12"/>
                 <TextBox x:Name="AlertExcludedDatabasesBox" Margin="20,0,0,4"/>
-                <TextBlock Text="e.g. DBAtools, msdb, tempdb — applies to long-running query and blocking alerts"
+                <TextBlock Text="e.g. DBAtools, msdb, tempdb — applies to blocking, deadlock, and long-running query alerts"
                            FontSize="11" FontStyle="Italic" Foreground="{DynamicResource ForegroundMutedBrush}"
                            Margin="20,0,0,0" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="20,6,0,0">
