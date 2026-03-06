@@ -8,6 +8,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
@@ -455,6 +456,7 @@ public partial class SettingsWindow : Window
         LrqExcludeWaitForCheckBox.IsChecked = App.AlertLongRunningQueryExcludeWaitFor;
         LrqExcludeBackupsCheckBox.IsChecked = App.AlertLongRunningQueryExcludeBackups;
         LrqExcludeMiscWaitsCheckBox.IsChecked = App.AlertLongRunningQueryExcludeMiscWaits;
+        AlertExcludedDatabasesBox.Text = string.Join(", ", App.AlertExcludedDatabases);
         AlertTempDbSpaceCheckBox.IsChecked = App.AlertTempDbSpaceEnabled;
         AlertTempDbSpaceThresholdBox.Text = App.AlertTempDbSpaceThresholdPercent.ToString();
         AlertLongRunningJobCheckBox.IsChecked = App.AlertLongRunningJobEnabled;
@@ -490,6 +492,11 @@ public partial class SettingsWindow : Window
         App.AlertLongRunningQueryExcludeWaitFor = LrqExcludeWaitForCheckBox.IsChecked == true;
         App.AlertLongRunningQueryExcludeBackups = LrqExcludeBackupsCheckBox.IsChecked == true;
         App.AlertLongRunningQueryExcludeMiscWaits = LrqExcludeMiscWaitsCheckBox.IsChecked == true;
+        App.AlertExcludedDatabases = AlertExcludedDatabasesBox.Text
+            .Split(',')
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
         App.AlertTempDbSpaceEnabled = AlertTempDbSpaceCheckBox.IsChecked == true;
         if (int.TryParse(AlertTempDbSpaceThresholdBox.Text, out var tempDb) && tempDb > 0 && tempDb <= 100)
             App.AlertTempDbSpaceThresholdPercent = tempDb;
@@ -538,6 +545,9 @@ public partial class SettingsWindow : Window
             root["alert_long_running_query_exclude_waitfor"] = App.AlertLongRunningQueryExcludeWaitFor;
             root["alert_long_running_query_exclude_backups"] = App.AlertLongRunningQueryExcludeBackups;
             root["alert_long_running_query_exclude_misc_waits"] = App.AlertLongRunningQueryExcludeMiscWaits;
+            var dbArray = new System.Text.Json.Nodes.JsonArray();
+            foreach (var db in App.AlertExcludedDatabases) dbArray.Add(db);
+            root["alert_excluded_databases"] = dbArray;
             root["alert_tempdb_space_enabled"] = App.AlertTempDbSpaceEnabled;
             root["alert_tempdb_space_threshold_percent"] = App.AlertTempDbSpaceThresholdPercent;
             root["alert_long_running_job_enabled"] = App.AlertLongRunningJobEnabled;
@@ -581,6 +591,7 @@ public partial class SettingsWindow : Window
         AlertLongRunningJobMultiplierBox.Text = "3";
         AlertCooldownBox.Text = "5";
         EmailCooldownBox.Text = "15";
+        AlertExcludedDatabasesBox.Text = "";
         UpdateAlertPreviewText();
     }
 

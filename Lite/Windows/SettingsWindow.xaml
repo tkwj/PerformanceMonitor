@@ -234,6 +234,15 @@
                 </StackPanel>
                 <TextBlock x:Name="AlertPreviewText" FontSize="11" FontStyle="Italic"
                            Foreground="{DynamicResource ForegroundMutedBrush}" TextWrapping="Wrap" Margin="20,10,0,0"/>
+                <!-- Global Alert Filters -->
+                <TextBlock Text="Global Alert Filters" FontWeight="SemiBold" FontSize="12"
+                           Foreground="{DynamicResource ForegroundBrush}" Margin="20,14,0,4"/>
+                <TextBlock Text="Exclude databases from alerts (comma-separated):"
+                           Foreground="{DynamicResource ForegroundBrush}" Margin="20,0,0,4" FontSize="12"/>
+                <TextBox x:Name="AlertExcludedDatabasesBox" Margin="20,0,0,4"/>
+                <TextBlock Text="e.g. DBAtools, msdb, tempdb — applies to blocking, deadlock, and long-running query alerts"
+                           FontSize="11" FontStyle="Italic" Foreground="{DynamicResource ForegroundMutedBrush}"
+                           Margin="20,0,0,0" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 
