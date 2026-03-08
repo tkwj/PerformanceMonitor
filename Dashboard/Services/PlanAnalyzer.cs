@@ -388,12 +388,12 @@ public static partial class PlanAnalyzer
                         var direction = ratio >= 10.0 ? "underestimated" : "overestimated";
                         var factor = ratio >= 10.0 ? ratio : 1.0 / ratio;
                         var actualDisplay = executions > 1
-                            ? $"actual {actualPerExec:N0}/exec ({node.ActualRows:N0} total across {executions:N0} executions)"
-                            : $"actual {node.ActualRows:N0}";
+                            ? $"Actual {node.ActualRows:N0} ({actualPerExec:N0} rows x {executions:N0} executions)"
+                            : $"Actual {node.ActualRows:N0}";
                         node.Warnings.Add(new PlanWarning
                         {
                             WarningType = "Row Estimate Mismatch",
-                            Message = $"Estimated {node.EstimateRows:N0} rows, {actualDisplay} ({factor:F0}x {direction}). {harm}",
+                            Message = $"Estimated {node.EstimateRows:N0} vs {actualDisplay} — {factor:F0}x {direction}. {harm}",
                             Severity = factor >= 100 ? PlanWarningSeverity.Critical : PlanWarningSeverity.Warning
                         });
                     }
