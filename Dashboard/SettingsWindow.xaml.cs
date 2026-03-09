@@ -514,7 +514,7 @@ namespace PerformanceMonitorDashboard
             McpStatusText.Text = "Copied to clipboard!";
         }
 
-        private void OkButton_Click(object sender, RoutedEventArgs e)
+        private async void OkButton_Click(object sender, RoutedEventArgs e)
         {
             var prefs = _preferencesService.GetPreferences();
 
@@ -675,20 +675,18 @@ namespace PerformanceMonitorDashboard
             {
                 if (prefs.McpEnabled && mcpPort != prefs.McpPort)
                 {
-                    bool inUse = Task.Run(() => PortUtilityService.IsTcpPortListeningAsync(mcpPort, IPAddress.Loopback)).GetAwaiter().GetResult();
-                    if (inUse)
+                    // CanBindTcpPortAsync attempts an actual bind, which is more reliable
+                    // than checking listeners (TOCTOU is still possible but less likely)
+                    bool canBind = await PortUtilityService.CanBindTcpPortAsync(mcpPort, IPAddress.Loopback);
+                    if (!canBind)
                     {
-                        validationErrors.add($"Port {mcpPort} is already in use. Choose a different port for the MCP server.");
+                        validationErrors.Add($"Port {mcpPort} is already in use. Choose a different port for the MCP server.");
                     }
                 }
                 prefs.McpPort = mcpPort;
             }
             else
                 validationErrors.Add($"MCP port must be between 1024 and {IPEndPoint.MaxPort}.\nPorts 0–1023 are well-known privileged ports reserved by the operating system.");
-
-            _preferencesService.SavePreferences(prefs);
-
-            _saved = true;
 
             if (validationErrors.Count > 0)
             {
@@ -699,6 +697,8 @@ namespace PerformanceMonitorDashboard
             }
             else
             {
+                _preferencesService.SavePreferences(prefs);
+                _saved = true;
                 DialogResult = true;
                 Close();
             }

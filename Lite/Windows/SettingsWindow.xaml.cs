@@ -164,10 +164,10 @@ public partial class SettingsWindow : Window
         UpdateCollectionStatus();
     }
 
-    private void SaveButton_Click(object sender, RoutedEventArgs e)
+    private async void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         _scheduleManager.SaveSchedules();
-        var (mcpChanged, mcpValid) = SaveMcpSettings();
+        var (mcpChanged, mcpValid) = await SaveMcpSettingsAsync();
         SaveDefaultTimeRange();
         SaveConnectionTimeout();
         SaveCsvSeparator();
@@ -187,7 +187,7 @@ public partial class SettingsWindow : Window
         MessageBox.Show(message, "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private (bool Changed, bool Valid) SaveMcpSettings()
+    private async Task<(bool Changed, bool Valid)> SaveMcpSettingsAsync()
     {
         var settingsPath = Path.Combine(App.ConfigDirectory, "settings.json");
 
@@ -214,18 +214,20 @@ public partial class SettingsWindow : Window
                 if (newPort < 1024 || newPort > IPEndPoint.MaxPort)
                 {
                     MessageBox.Show(
-                        $"MCP port must be between 1024 and {IPEndPoint.MaxPort}.\nPorts 0�1023 are well-known privileged ports reserved by the operating system.",
+                        $"MCP port must be between 1024 and {IPEndPoint.MaxPort}.\nPorts 0–1023 are well-known privileged ports reserved by the operating system.",
                         "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return false;
+                    return (true, false);
                 }
 
-                bool inUse = Task.Run(() => PortUtilityService.IsTcpPortListeningAsync(newPort, IPAddress.Loopback)).GetAwaiter().GetResult();
-                if (inUse)
+                // CanBindTcpPortAsync attempts an actual bind, which is more reliable
+                // than checking listeners (TOCTOU is still possible but less likely)
+                bool canBind = await PortUtilityService.CanBindTcpPortAsync(newPort, IPAddress.Loopback);
+                if (!canBind)
                 {
                     MessageBox.Show(
                         $"Port {newPort} is already in use. Choose a different port for the MCP server.",
                         "Port Conflict", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return false;
+                    return (true, false);
                 }
             }
 
