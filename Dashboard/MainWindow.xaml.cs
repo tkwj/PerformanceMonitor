@@ -432,23 +432,23 @@ namespace PerformanceMonitorDashboard
             }
         }
 
-        private void ServerListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void ServerListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (ServerListView.SelectedItem is ServerListItem item)
             {
-                OpenServerTab(item.Server);
+                await OpenServerTabAsync(item.Server);
             }
         }
 
-        private void OpenServerTab_Click(object sender, RoutedEventArgs e)
+        private async void OpenServerTab_Click(object sender, RoutedEventArgs e)
         {
             if (ServerListView.SelectedItem is ServerListItem item)
             {
-                OpenServerTab(item.Server);
+                await OpenServerTabAsync(item.Server);
             }
         }
 
-        private void OpenServerTab(ServerConnection server)
+        private async Task OpenServerTabAsync(ServerConnection server)
         {
             if (_openTabs.TryGetValue(server.Id, out var existingTab))
             {
@@ -464,7 +464,7 @@ namespace PerformanceMonitorDashboard
                    the first tab open doesn't default to local timezone. */
                 try
                 {
-                    _serverManager.CheckConnectionAsync(server.Id).GetAwaiter().GetResult();
+                    await _serverManager.CheckConnectionAsync(server.Id);
                     connStatus = _serverManager.GetConnectionStatus(server.Id);
                 }
                 catch { /* Fall through to local offset default */ }
@@ -792,9 +792,9 @@ namespace PerformanceMonitorDashboard
             }
         }
 
-        private void LandingPage_ServerCardClicked(object? sender, ServerConnection server)
+        private async void LandingPage_ServerCardClicked(object? sender, ServerConnection server)
         {
-            OpenServerTab(server);
+            await OpenServerTabAsync(server);
         }
 
         private async void AddServer_Click(object sender, RoutedEventArgs e)
