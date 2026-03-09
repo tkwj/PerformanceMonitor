@@ -349,6 +349,7 @@ Alert emails include:
 - **Server silencing** — right-click a server tab to acknowledge alerts, silence all alerts, or unsilence
 - **Always-on** — the Dashboard alert engine runs independently of which tab is active, including when minimized to the system tray. The Lite edition's alert engine also runs regardless of tab visibility.
 - **Alert history** — Dashboard keeps an in-memory alert log (accessible via MCP). Lite logs alerts to DuckDB (`config_alert_log`).
+- **Alert muting** — create rules to suppress specific recurring alerts while still logging them. Rules match on server name, metric type, database, query text, wait type, or job name (AND logic across fields). Access via Settings → Manage Mute Rules, or right-click an alert in the Alert History tab. Muted alerts appear grayed out in alert history and are still recorded for auditability. Rules support optional expiration (1h, 24h, 7 days, or permanent).
 
 ---
 
