@@ -356,6 +356,9 @@ public partial class RemoteCollectorService
                 "database_scoped_config" => await CollectDatabaseScopedConfigAsync(server, cancellationToken),
                 "trace_flags" => await CollectTraceFlagsAsync(server, cancellationToken),
                 "running_jobs" => await CollectRunningJobsAsync(server, cancellationToken),
+                "database_size_stats" => await CollectDatabaseSizeStatsAsync(server, cancellationToken),
+                "server_properties" => await CollectServerPropertiesAsync(server, cancellationToken),
+                "session_stats" => await CollectSessionStatsAsync(server, cancellationToken),
                 _ => throw new ArgumentException($"Unknown collector: {collectorName}")
             };
 

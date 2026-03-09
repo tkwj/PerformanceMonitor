@@ -27,6 +27,7 @@ using PerformanceMonitorDashboard.Helpers;
 using PerformanceMonitorDashboard.Services;
 using System.ComponentModel;
 using System.Windows.Data;
+using System.Xml.Linq;
 
 namespace PerformanceMonitorDashboard
 {
@@ -49,6 +50,8 @@ namespace PerformanceMonitorDashboard
         private LandingPage? _landingPage;
         private TabItem? _alertsTab;
         private TabItem? _planViewerTab;
+        private TabItem? _finOpsTab;
+        private Controls.FinOpsContent? _finOpsContent;
         private AlertsHistoryContent? _alertsHistoryContent;
 
         private McpHostService? _mcpHostService;
@@ -61,7 +64,6 @@ namespace PerformanceMonitorDashboard
         private readonly ConcurrentDictionary<string, DateTime> _lastBlockingAlert = new();
         private readonly ConcurrentDictionary<string, DateTime> _lastDeadlockAlert = new();
         private readonly ConcurrentDictionary<string, DateTime> _lastHighCpuAlert = new();
-        private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
         private readonly ConcurrentDictionary<string, bool> _activeBlockingAlert = new();
         private readonly ConcurrentDictionary<string, bool> _activeDeadlockAlert = new();
         private readonly ConcurrentDictionary<string, bool> _activeHighCpuAlert = new();
@@ -80,6 +82,7 @@ namespace PerformanceMonitorDashboard
         private const string NocTabId = "__NOC_OVERVIEW__";
         private const string AlertsTabId = "__ALERTS_HISTORY__";
         private const string PlanViewerTabId = "__PLAN_VIEWER__";
+        private const string FinOpsTabId = "__FINOPS__";
 
         public MainWindow()
         {
@@ -470,23 +473,23 @@ namespace PerformanceMonitorDashboard
             }
         }
 
-        private void ServerListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void ServerListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (ServerListView.SelectedItem is ServerListItem item)
             {
-                OpenServerTab(item.Server);
+                await OpenServerTabAsync(item.Server);
             }
         }
 
-        private void OpenServerTab_Click(object sender, RoutedEventArgs e)
+        private async void OpenServerTab_Click(object sender, RoutedEventArgs e)
         {
             if (ServerListView.SelectedItem is ServerListItem item)
             {
-                OpenServerTab(item.Server);
+                await OpenServerTabAsync(item.Server);
             }
         }
 
-        private void OpenServerTab(ServerConnection server)
+        private async Task OpenServerTabAsync(ServerConnection server)
         {
             if (_openTabs.TryGetValue(server.Id, out var existingTab))
             {
@@ -502,7 +505,7 @@ namespace PerformanceMonitorDashboard
                    the first tab open doesn't default to local timezone. */
                 try
                 {
-                    _serverManager.CheckConnectionAsync(server.Id).GetAwaiter().GetResult();
+                    await _serverManager.CheckConnectionAsync(server.Id);
                     connStatus = _serverManager.GetConnectionStatus(server.Id);
                 }
                 catch { /* Fall through to local offset default */ }
@@ -668,6 +671,11 @@ namespace PerformanceMonitorDashboard
             OpenAlertsTab();
         }
 
+        private void FinOps_Click(object sender, RoutedEventArgs e)
+        {
+            OpenFinOpsTab();
+        }
+
         private void OpenAlertsTab()
         {
             if (_alertsTab != null && ServerTabControl.Items.Contains(_alertsTab))
@@ -711,6 +719,61 @@ namespace PerformanceMonitorDashboard
             _alertsHistoryContent.RefreshAlerts();
         }
 
+        private void OpenFinOpsTab()
+        {
+            if (_finOpsTab != null && ServerTabControl.Items.Contains(_finOpsTab))
+            {
+                ServerTabControl.SelectedItem = _finOpsTab;
+                _ = _finOpsContent?.RefreshDataAsync();
+                return;
+            }
+
+            // Ensure at least one server is configured
+            var servers = _serverManager.GetAllServers();
+            if (servers.Count == 0)
+            {
+                MessageBox.Show("Add at least one server before opening FinOps.", "No Servers",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _finOpsContent = new Controls.FinOpsContent();
+            _finOpsContent.Initialize(_serverManager, _credentialService);
+
+            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            var headerText = new TextBlock
+            {
+                Text = "FinOps",
+                VerticalAlignment = VerticalAlignment.Center,
+                FontWeight = FontWeights.SemiBold
+            };
+            var closeButton = new Button
+            {
+                Style = (Style)FindResource("TabCloseButton"),
+                Tag = FinOpsTabId
+            };
+            closeButton.Click += CloseTab_Click;
+            headerPanel.Children.Add(headerText);
+            headerPanel.Children.Add(closeButton);
+
+            _finOpsTab = new TabItem
+            {
+                Header = headerPanel,
+                Content = _finOpsContent,
+                Tag = FinOpsTabId
+            };
+
+            /* Insert after Alerts tab if present, else after NOC, else at 0 */
+            var insertIndex = 0;
+            if (_alertsTab != null && ServerTabControl.Items.Contains(_alertsTab))
+                insertIndex = ServerTabControl.Items.IndexOf(_alertsTab) + 1;
+            else if (_nocTab != null && ServerTabControl.Items.Contains(_nocTab))
+                insertIndex = ServerTabControl.Items.IndexOf(_nocTab) + 1;
+
+            ServerTabControl.Items.Insert(insertIndex, _finOpsTab);
+            ServerTabControl.SelectedItem = _finOpsTab;
+        }
+
         private void CloseTab_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.Tag is string tabId)
@@ -732,6 +795,15 @@ namespace PerformanceMonitorDashboard
                         ServerTabControl.Items.Remove(_alertsTab);
                         _alertsTab = null;
                         _alertsHistoryContent = null;
+                    }
+                }
+                else if (tabId == FinOpsTabId)
+                {
+                    if (_finOpsTab != null)
+                    {
+                        ServerTabControl.Items.Remove(_finOpsTab);
+                        _finOpsTab = null;
+                        _finOpsContent = null;
                     }
                 }
                 else if (tabId == PlanViewerTabId)
@@ -761,9 +833,9 @@ namespace PerformanceMonitorDashboard
             }
         }
 
-        private void LandingPage_ServerCardClicked(object? sender, ServerConnection server)
+        private async void LandingPage_ServerCardClicked(object? sender, ServerConnection server)
         {
-            OpenServerTab(server);
+            await OpenServerTabAsync(server);
         }
 
         private async void AddServer_Click(object sender, RoutedEventArgs e)
@@ -1112,7 +1184,7 @@ namespace PerformanceMonitorDashboard
                     var connectionString = server.GetConnectionString(_credentialService);
                     var databaseService = new DatabaseService(connectionString);
                     var connStatus = _serverManager.GetConnectionStatus(server.Id);
-                    var health = await databaseService.GetAlertHealthAsync(connStatus.SqlEngineEdition, prefs.LongRunningQueryThresholdMinutes, prefs.LongRunningJobMultiplier, prefs.LongRunningQueryMaxResults, prefs.LongRunningQueryExcludeSpServerDiagnostics, prefs.LongRunningQueryExcludeWaitFor, prefs.LongRunningQueryExcludeBackups, prefs.LongRunningQueryExcludeMiscWaits);
+                    var health = await databaseService.GetAlertHealthAsync(connStatus.SqlEngineEdition, prefs.LongRunningQueryThresholdMinutes, prefs.LongRunningJobMultiplier, prefs.LongRunningQueryMaxResults, prefs.LongRunningQueryExcludeSpServerDiagnostics, prefs.LongRunningQueryExcludeWaitFor, prefs.LongRunningQueryExcludeBackups, prefs.LongRunningQueryExcludeMiscWaits, prefs.AlertExcludedDatabases);
 
                     if (health.IsOnline)
                     {
@@ -1144,6 +1216,7 @@ namespace PerformanceMonitorDashboard
             string serverId, string serverName, AlertHealthResult health, DatabaseService databaseService)
         {
             var prefs = _preferencesService.GetPreferences();
+            var alertCooldown = TimeSpan.FromMinutes(prefs.AlertCooldownMinutes);
 
             if (_alertStateService.IsAnySilencingActive(serverId))
             {
@@ -1159,7 +1232,7 @@ namespace PerformanceMonitorDashboard
             if (blockingExceeded)
             {
                 _activeBlockingAlert[serverId] = true;
-                if (!_lastBlockingAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastBlockingAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     _notificationService?.ShowBlockingNotification(
                         serverName,
@@ -1171,7 +1244,7 @@ namespace PerformanceMonitorDashboard
                         $"{(int)health.TotalBlocked} session(s), longest {(int)health.LongestBlockedSeconds}s",
                         $"{prefs.BlockingThresholdSeconds}s", true, "tray");
 
-                    var blockingContext = await BuildBlockingContextAsync(databaseService);
+                    var blockingContext = await BuildBlockingContextAsync(databaseService, prefs.AlertExcludedDatabases);
 
                     await _emailAlertService.TrySendAlertEmailAsync(
                         "Blocking Detected",
@@ -1199,29 +1272,34 @@ namespace PerformanceMonitorDashboard
             }
             _previousDeadlockCounts[serverId] = health.DeadlockCount;
 
+            /* Use the database-filtered count when excluded databases are configured,
+               matching how blocking alerts filter before the threshold check.
+               Falls back to the raw delta when no databases are excluded. */
+            var effectiveDeadlockDelta = health.FilteredDeadlockCount ?? deadlockDelta;
+
             bool deadlocksExceeded = prefs.NotifyOnDeadlock
-                && deadlockDelta >= prefs.DeadlockThreshold;
+                && effectiveDeadlockDelta >= prefs.DeadlockThreshold;
 
             if (deadlocksExceeded)
             {
                 _activeDeadlockAlert[serverId] = true;
-                if (!_lastDeadlockAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastDeadlockAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     _notificationService?.ShowDeadlockNotification(
                         serverName,
-                        (int)deadlockDelta);
+                        (int)effectiveDeadlockDelta);
                     _lastDeadlockAlert[serverId] = now;
 
                     _emailAlertService.RecordAlert(serverId, serverName, "Deadlocks Detected",
-                        deadlockDelta.ToString(),
+                        effectiveDeadlockDelta.ToString(),
                         prefs.DeadlockThreshold.ToString(), true, "tray");
 
-                    var deadlockContext = await BuildDeadlockContextAsync(databaseService);
+                    var deadlockContext = await BuildDeadlockContextAsync(databaseService, prefs.AlertExcludedDatabases);
 
                     await _emailAlertService.TrySendAlertEmailAsync(
                         "Deadlocks Detected",
                         serverName,
-                        deadlockDelta.ToString(),
+                        effectiveDeadlockDelta.ToString(),
                         prefs.DeadlockThreshold.ToString(),
                         serverId,
                         deadlockContext);
@@ -1244,7 +1322,7 @@ namespace PerformanceMonitorDashboard
             {
                 var totalCpu = health.TotalCpuPercent!.Value;
                 _activeHighCpuAlert[serverId] = true;
-                if (!_lastHighCpuAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastHighCpuAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     _notificationService?.ShowHighCpuNotification(
                         serverName,
@@ -1280,7 +1358,7 @@ namespace PerformanceMonitorDashboard
             if (triggeredWaits.Count > 0)
             {
                 _activePoisonWaitAlert[serverId] = true;
-                if (!_lastPoisonWaitAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastPoisonWaitAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     var worst = triggeredWaits[0];
                     _notificationService?.ShowPoisonWaitNotification(serverName, worst.WaitType, worst.AvgMsPerWait);
@@ -1311,15 +1389,23 @@ namespace PerformanceMonitorDashboard
             }
 
             /* Long-running query alerts */
+            var lrqList = health.LongRunningQueries;
+            if (prefs.AlertExcludedDatabases.Count > 0)
+                lrqList = lrqList
+                    .Where(q => string.IsNullOrEmpty(q.DatabaseName) ||
+                        !prefs.AlertExcludedDatabases.Any(e =>
+                            string.Equals(e, q.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
             bool longRunningTriggered = prefs.NotifyOnLongRunningQueries
-                && health.LongRunningQueries.Count > 0;
+                && lrqList.Count > 0;
 
             if (longRunningTriggered)
             {
                 _activeLongRunningQueryAlert[serverId] = true;
-                if (!_lastLongRunningQueryAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastLongRunningQueryAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
-                    var worst = health.LongRunningQueries[0];
+                    var worst = lrqList[0];
                     var elapsedMinutes = worst.ElapsedSeconds / 60;
                     var preview = Truncate(worst.QueryText, 80);
                     _notificationService?.ShowLongRunningQueryNotification(
@@ -1330,12 +1416,12 @@ namespace PerformanceMonitorDashboard
                         $"Session #{worst.SessionId} running {elapsedMinutes}m",
                         $"{prefs.LongRunningQueryThresholdMinutes}m", true, "tray");
 
-                    var lrqContext = BuildLongRunningQueryContext(health.LongRunningQueries);
+                    var lrqContext = BuildLongRunningQueryContext(lrqList);
 
                     await _emailAlertService.TrySendAlertEmailAsync(
                         "Long-Running Query",
                         serverName,
-                        $"{health.LongRunningQueries.Count} query(s), longest {elapsedMinutes}m",
+                        $"{lrqList.Count} query(s), longest {elapsedMinutes}m",
                         $"{prefs.LongRunningQueryThresholdMinutes}m",
                         serverId,
                         lrqContext);
@@ -1358,7 +1444,7 @@ namespace PerformanceMonitorDashboard
             {
                 var tempDb = health.TempDbSpace!;
                 _activeTempDbSpaceAlert[serverId] = true;
-                if (!_lastTempDbSpaceAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastTempDbSpaceAlert.TryGetValue(serverId, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     _notificationService?.ShowTempDbSpaceNotification(serverName, tempDb.UsedPercent);
                     _lastTempDbSpaceAlert[serverId] = now;
@@ -1397,7 +1483,7 @@ namespace PerformanceMonitorDashboard
                 var worst = health.AnomalousJobs[0];
                 var jobKey = $"{serverId}:{worst.JobId}:{worst.StartTime:O}";
 
-                if (!_lastLongRunningJobAlert.TryGetValue(jobKey, out var lastAlert) || (now - lastAlert) >= AlertCooldown)
+                if (!_lastLongRunningJobAlert.TryGetValue(jobKey, out var lastAlert) || (now - lastAlert) >= alertCooldown)
                 {
                     var currentMinutes = worst.CurrentDurationSeconds / 60;
                     _notificationService?.ShowLongRunningJobNotification(
@@ -1435,12 +1521,22 @@ namespace PerformanceMonitorDashboard
             return text.Length <= maxLength ? text : text.Substring(0, maxLength) + "...";
         }
 
-        private static async Task<AlertContext?> BuildBlockingContextAsync(DatabaseService databaseService)
+        private static async Task<AlertContext?> BuildBlockingContextAsync(DatabaseService databaseService, List<string>? excludedDatabases = null)
         {
             try
             {
                 var events = await databaseService.GetBlockingEventsAsync(hoursBack: 1);
                 if (events == null || events.Count == 0) return null;
+
+                if (excludedDatabases != null && excludedDatabases.Count > 0)
+                {
+                    events = events
+                        .Where(e => string.IsNullOrEmpty(e.DatabaseName) ||
+                            !excludedDatabases.Any(ex =>
+                                string.Equals(ex, e.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (events.Count == 0) return null;
+                }
 
                 var context = new AlertContext();
                 var firstXml = (string?)null;
@@ -1483,12 +1579,20 @@ namespace PerformanceMonitorDashboard
             }
         }
 
-        private static async Task<AlertContext?> BuildDeadlockContextAsync(DatabaseService databaseService)
+        private static async Task<AlertContext?> BuildDeadlockContextAsync(DatabaseService databaseService, List<string>? excludedDatabases = null)
         {
             try
             {
                 var deadlocks = await databaseService.GetDeadlocksAsync(hoursBack: 1);
                 if (deadlocks == null || deadlocks.Count == 0) return null;
+
+                if (excludedDatabases != null && excludedDatabases.Count > 0)
+                {
+                    deadlocks = deadlocks
+                        .Where(d => !IsDeadlockExcluded(d, excludedDatabases))
+                        .ToList();
+                    if (deadlocks.Count == 0) return null;
+                }
 
                 var context = new AlertContext();
                 var firstGraph = (string?)null;
@@ -1541,6 +1645,29 @@ namespace PerformanceMonitorDashboard
                 Logger.Error($"Failed to fetch deadlock detail for email: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Returns true if a deadlock should be excluded based on the deadlock graph XML.
+        /// A deadlock is only excluded when ALL process nodes have a currentdbname in the excluded list.
+        /// Cross-database deadlocks involving any non-excluded database will still be reported.
+        /// </summary>
+        private static bool IsDeadlockExcluded(DeadlockItem deadlock, List<string> excludedDatabases)
+        {
+            if (string.IsNullOrEmpty(deadlock.DeadlockGraph)) return false;
+            try
+            {
+                var doc = XElement.Parse(deadlock.DeadlockGraph);
+                var dbNames = doc.Descendants("process")
+                    .Select(p => p.Attribute("currentdbname")?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Cast<string>()
+                    .ToList();
+                if (dbNames.Count == 0) return false;
+                return dbNames.All(db => excludedDatabases.Any(e =>
+                    string.Equals(e, db, StringComparison.OrdinalIgnoreCase)));
+            }
+            catch { return false; }
         }
 
         private static AlertContext? BuildPoisonWaitContext(List<PoisonWaitDelta> triggeredWaits)

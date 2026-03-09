@@ -8,6 +8,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using System.Windows;
@@ -169,10 +170,13 @@ namespace PerformanceMonitorDashboard
             LrqExcludeWaitForCheckBox.IsChecked = prefs.LongRunningQueryExcludeWaitFor;
             LrqExcludeBackupsCheckBox.IsChecked = prefs.LongRunningQueryExcludeBackups;
             LrqExcludeMiscWaitsCheckBox.IsChecked = prefs.LongRunningQueryExcludeMiscWaits;
+            AlertExcludedDatabasesTextBox.Text = string.Join(", ", prefs.AlertExcludedDatabases);
             NotifyOnTempDbSpaceCheckBox.IsChecked = prefs.NotifyOnTempDbSpace;
             TempDbSpaceThresholdTextBox.Text = prefs.TempDbSpaceThresholdPercent.ToString(CultureInfo.InvariantCulture);
             NotifyOnLongRunningJobsCheckBox.IsChecked = prefs.NotifyOnLongRunningJobs;
             LongRunningJobMultiplierTextBox.Text = prefs.LongRunningJobMultiplier.ToString(CultureInfo.InvariantCulture);
+            AlertCooldownTextBox.Text = prefs.AlertCooldownMinutes.ToString(CultureInfo.InvariantCulture);
+            EmailCooldownTextBox.Text = prefs.EmailCooldownMinutes.ToString(CultureInfo.InvariantCulture);
 
             UpdateNotificationCheckboxStates();
 
@@ -313,6 +317,9 @@ namespace PerformanceMonitorDashboard
             LongRunningQueryThresholdTextBox.Text = "30";
             TempDbSpaceThresholdTextBox.Text = "80";
             LongRunningJobMultiplierTextBox.Text = "3";
+            AlertCooldownTextBox.Text = "5";
+            EmailCooldownTextBox.Text = "15";
+            AlertExcludedDatabasesTextBox.Text = "";
             UpdateAlertPreviewText();
         }
 
@@ -615,6 +622,11 @@ namespace PerformanceMonitorDashboard
             prefs.LongRunningQueryExcludeWaitFor = LrqExcludeWaitForCheckBox.IsChecked == true;
             prefs.LongRunningQueryExcludeBackups = LrqExcludeBackupsCheckBox.IsChecked == true;
             prefs.LongRunningQueryExcludeMiscWaits = LrqExcludeMiscWaitsCheckBox.IsChecked == true;
+            prefs.AlertExcludedDatabases = AlertExcludedDatabasesTextBox.Text
+                .Split(',')
+                .Select(s => s.Trim())
+                .Where(s => s.Length > 0)
+                .ToList();
 
             prefs.NotifyOnTempDbSpace = NotifyOnTempDbSpaceCheckBox.IsChecked == true;
             if (int.TryParse(TempDbSpaceThresholdTextBox.Text, out int tempDbThreshold) && tempDbThreshold > 0 && tempDbThreshold <= 100)
@@ -628,13 +640,15 @@ namespace PerformanceMonitorDashboard
             else if (prefs.NotifyOnLongRunningJobs)
                 validationErrors.Add("Job multiplier must be a positive number");
 
-            if (validationErrors.Count > 0)
-            {
-                MessageBox.Show(
-                    "Some alert thresholds have invalid values and were not changed:\n\n" +
-                    string.Join("\n", validationErrors),
-                    "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
+            if (int.TryParse(AlertCooldownTextBox.Text, out int alertCooldown) && alertCooldown >= 1 && alertCooldown <= 120)
+                prefs.AlertCooldownMinutes = alertCooldown;
+            else
+                validationErrors.Add("Tray notification cooldown must be between 1 and 120 minutes");
+
+            if (int.TryParse(EmailCooldownTextBox.Text, out int emailCooldown) && emailCooldown >= 1 && emailCooldown <= 120)
+                prefs.EmailCooldownMinutes = emailCooldown;
+            else
+                validationErrors.Add("Email alert cooldown must be between 1 and 120 minutes");
 
             // Save SMTP email settings
             prefs.SmtpEnabled = SmtpEnabledCheckBox.IsChecked == true;
@@ -643,6 +657,8 @@ namespace PerformanceMonitorDashboard
             {
                 prefs.SmtpPort = smtpPort;
             }
+            else 
+                validationErrors.Add("Smtp Port failed validation - must be a valid TCP port number.");
             prefs.SmtpUseSsl = SmtpSslCheckBox.IsChecked == true;
             prefs.SmtpUsername = SmtpUsernameTextBox.Text?.Trim() ?? "";
             prefs.SmtpFromAddress = SmtpFromTextBox.Text?.Trim() ?? "";
@@ -662,27 +678,30 @@ namespace PerformanceMonitorDashboard
                     bool inUse = Task.Run(() => PortUtilityService.IsTcpPortListeningAsync(mcpPort, IPAddress.Loopback)).GetAwaiter().GetResult();
                     if (inUse)
                     {
-                        MessageBox.Show(
-                            $"Port {mcpPort} is already in use. Choose a different port for the MCP server.",
-                            "Port Conflict", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
+                        validationErrors.add($"Port {mcpPort} is already in use. Choose a different port for the MCP server.");
                     }
                 }
                 prefs.McpPort = mcpPort;
             }
             else
-            {
-                MessageBox.Show(
-                    $"MCP port must be between 1024 and {IPEndPoint.MaxPort}.\nPorts 0–1023 are well-known privileged ports reserved by the operating system.",
-                    "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
+                validationErrors.Add($"MCP port must be between 1024 and {IPEndPoint.MaxPort}.\nPorts 0–1023 are well-known privileged ports reserved by the operating system.");
 
             _preferencesService.SavePreferences(prefs);
 
             _saved = true;
-            DialogResult = true;
-            Close();
+
+            if (validationErrors.Count > 0)
+            {
+                MessageBox.Show(
+                    "Some settings have invalid values and were not changed:\n\n" +
+                    string.Join("\n", validationErrors),
+                    "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            else
+            {
+                DialogResult = true;
+                Close();
+            }
         }
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)

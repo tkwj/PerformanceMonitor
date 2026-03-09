@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Xml.Linq;
 using System.Net;
 using System.Threading;
 using System.Windows;
@@ -44,7 +45,6 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DateTime> _lastLongRunningQueryAlert = new();
     private readonly Dictionary<string, DateTime> _lastTempDbSpaceAlert = new();
     private readonly Dictionary<string, DateTime> _lastLongRunningJobAlert = new();
-    private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
     private readonly DispatcherTimer _statusTimer;
     private LocalDataService? _dataService;
     private McpHostService? _mcpService;
@@ -125,6 +125,9 @@ public partial class MainWindow : Window
 
             // Initialize alerts history tab
             AlertsHistoryContent.Initialize(_dataService);
+
+            // Initialize FinOps tab
+            FinOpsContent.Initialize(_dataService, _serverManager);
 
             // Start MCP server if enabled
             await StartMcpServerAsync();
@@ -994,6 +997,7 @@ public partial class MainWindow : Window
 
         var key = summary.ServerId.ToString();
         var now = DateTime.UtcNow;
+        var alertCooldown = TimeSpan.FromMinutes(App.AlertCooldownMinutes);
 
         /* Skip popup/email alerts if user has acknowledged or silenced this server */
         bool suppressPopups = !_alertStateService.ShouldShowAlerts(key);
@@ -1006,7 +1010,7 @@ public partial class MainWindow : Window
         if (cpuExceeded)
         {
             _activeCpuAlert[key] = true;
-            if (!suppressPopups && (!_lastCpuAlert.TryGetValue(key, out var lastCpu) || now - lastCpu >= AlertCooldown))
+            if (!suppressPopups && (!_lastCpuAlert.TryGetValue(key, out var lastCpu) || now - lastCpu >= alertCooldown))
             {
                 _trayService.ShowNotification(
                     "High CPU",
@@ -1032,17 +1036,35 @@ public partial class MainWindow : Window
         }
 
         /* Blocking alerts */
+        var effectiveBlockingCount = summary.BlockingCount;
+        if (App.AlertBlockingEnabled && App.AlertExcludedDatabases.Count > 0
+            && summary.BlockingCount >= App.AlertBlockingThreshold && _dataService != null)
+        {
+            try
+            {
+                var blockingRows = await _dataService.GetRecentBlockedProcessReportsAsync(summary.ServerId, hoursBack: 1);
+                effectiveBlockingCount = blockingRows
+                    .Count(r => string.IsNullOrEmpty(r.DatabaseName) ||
+                        !App.AlertExcludedDatabases.Any(e =>
+                            string.Equals(e, r.DatabaseName, StringComparison.OrdinalIgnoreCase)));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Alerts", $"Failed to filter blocking count for {summary.DisplayName}: {ex.Message}");
+            }
+        }
+
         bool blockingExceeded = App.AlertBlockingEnabled
-            && summary.BlockingCount >= App.AlertBlockingThreshold;
+            && effectiveBlockingCount >= App.AlertBlockingThreshold;
 
         if (blockingExceeded)
         {
             _activeBlockingAlert[key] = true;
-            if (!suppressPopups && (!_lastBlockingAlert.TryGetValue(key, out var lastBlocking) || now - lastBlocking >= AlertCooldown))
+            if (!suppressPopups && (!_lastBlockingAlert.TryGetValue(key, out var lastBlocking) || now - lastBlocking >= alertCooldown))
             {
                 _trayService.ShowNotification(
                     "Blocking Detected",
-                    $"{summary.DisplayName}: {summary.BlockingCount} blocking session(s)",
+                    $"{summary.DisplayName}: {effectiveBlockingCount} blocking session(s)",
                     Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Warning);
                 _lastBlockingAlert[key] = now;
 
@@ -1051,7 +1073,7 @@ public partial class MainWindow : Window
                 await _emailAlertService.TrySendAlertEmailAsync(
                     "Blocking Detected",
                     summary.DisplayName,
-                    summary.BlockingCount.ToString(),
+                    effectiveBlockingCount.ToString(),
                     App.AlertBlockingThreshold.ToString(),
                     summary.ServerId,
                     blockingContext);
@@ -1067,17 +1089,33 @@ public partial class MainWindow : Window
         }
 
         /* Deadlock alerts */
+        var effectiveDeadlockCount = summary.DeadlockCount;
+        if (App.AlertDeadlockEnabled && App.AlertExcludedDatabases.Count > 0
+            && summary.DeadlockCount >= App.AlertDeadlockThreshold && _dataService != null)
+        {
+            try
+            {
+                var deadlockRows = await _dataService.GetRecentDeadlocksAsync(summary.ServerId, hoursBack: 1);
+                effectiveDeadlockCount = deadlockRows
+                    .Count(r => !IsDeadlockExcluded(r, App.AlertExcludedDatabases));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Alerts", $"Failed to filter deadlock count for {summary.DisplayName}: {ex.Message}");
+            }
+        }
+
         bool deadlocksExceeded = App.AlertDeadlockEnabled
-            && summary.DeadlockCount >= App.AlertDeadlockThreshold;
+            && effectiveDeadlockCount >= App.AlertDeadlockThreshold;
 
         if (deadlocksExceeded)
         {
             _activeDeadlockAlert[key] = true;
-            if (!suppressPopups && (!_lastDeadlockAlert.TryGetValue(key, out var lastDeadlock) || now - lastDeadlock >= AlertCooldown))
+            if (!suppressPopups && (!_lastDeadlockAlert.TryGetValue(key, out var lastDeadlock) || now - lastDeadlock >= alertCooldown))
             {
                 _trayService.ShowNotification(
                     "Deadlocks Detected",
-                    $"{summary.DisplayName}: {summary.DeadlockCount} deadlock(s) in the last hour",
+                    $"{summary.DisplayName}: {effectiveDeadlockCount} deadlock(s) in the last hour",
                     Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Error);
                 _lastDeadlockAlert[key] = now;
 
@@ -1086,7 +1124,7 @@ public partial class MainWindow : Window
                 await _emailAlertService.TrySendAlertEmailAsync(
                     "Deadlocks Detected",
                     summary.DisplayName,
-                    summary.DeadlockCount.ToString(),
+                    effectiveDeadlockCount.ToString(),
                     App.AlertDeadlockThreshold.ToString(),
                     summary.ServerId,
                     deadlockContext);
@@ -1112,7 +1150,7 @@ public partial class MainWindow : Window
                 if (triggered.Count > 0)
                 {
                     _activePoisonWaitAlert[key] = true;
-                    if (!suppressPopups && (!_lastPoisonWaitAlert.TryGetValue(key, out var lastPoisonWait) || now - lastPoisonWait >= AlertCooldown))
+                    if (!suppressPopups && (!_lastPoisonWaitAlert.TryGetValue(key, out var lastPoisonWait) || now - lastPoisonWait >= alertCooldown))
                     {
                         var worst = triggered[0];
                         var allWaitNames = string.Join(", ", triggered.ConvertAll(w => $"{w.WaitType} ({w.AvgMsPerWait:F0}ms)"));
@@ -1130,7 +1168,9 @@ public partial class MainWindow : Window
                             allWaitNames,
                             $"{App.AlertPoisonWaitThresholdMs}ms avg",
                             summary.ServerId,
-                            poisonContext);
+                            poisonContext,
+                            numericCurrentValue: worst.AvgMsPerWait,
+                            numericThresholdValue: App.AlertPoisonWaitThresholdMs);
                     }
                 }
                 else if (_activePoisonWaitAlert.TryGetValue(key, out var wasPoisonWait) && wasPoisonWait)
@@ -1155,10 +1195,19 @@ public partial class MainWindow : Window
             {
                 var longRunning = await _dataService.GetLongRunningQueriesAsync(summary.ServerId, App.AlertLongRunningQueryThresholdMinutes, App.AlertLongRunningQueryMaxResults, App.AlertLongRunningQueryExcludeSpServerDiagnostics, App.AlertLongRunningQueryExcludeWaitFor, App.AlertLongRunningQueryExcludeBackups, App.AlertLongRunningQueryExcludeMiscWaits);
 
+                if (App.AlertExcludedDatabases.Count > 0)
+                {
+                    longRunning = longRunning
+                        .Where(q => string.IsNullOrEmpty(q.DatabaseName) ||
+                            !App.AlertExcludedDatabases.Any(e =>
+                                string.Equals(e, q.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                }
+
                 if (longRunning.Count > 0)
                 {
                     _activeLongRunningQueryAlert[key] = true;
-                    if (!suppressPopups && (!_lastLongRunningQueryAlert.TryGetValue(key, out var lastLrq) || now - lastLrq >= AlertCooldown))
+                    if (!suppressPopups && (!_lastLongRunningQueryAlert.TryGetValue(key, out var lastLrq) || now - lastLrq >= alertCooldown))
                     {
                         var worst = longRunning[0];
                         var elapsedMinutes = worst.ElapsedSeconds / 60;
@@ -1178,7 +1227,9 @@ public partial class MainWindow : Window
                             $"{longRunning.Count} query(s), longest {elapsedMinutes}m",
                             $"{App.AlertLongRunningQueryThresholdMinutes}m",
                             summary.ServerId,
-                            lrqContext);
+                            lrqContext,
+                            numericCurrentValue: elapsedMinutes,
+                            numericThresholdValue: App.AlertLongRunningQueryThresholdMinutes);
                     }
                 }
                 else if (_activeLongRunningQueryAlert.TryGetValue(key, out var wasLongRunning) && wasLongRunning)
@@ -1206,7 +1257,7 @@ public partial class MainWindow : Window
                 if (tempDb != null && tempDb.UsedPercent >= App.AlertTempDbSpaceThresholdPercent)
                 {
                     _activeTempDbSpaceAlert[key] = true;
-                    if (!suppressPopups && (!_lastTempDbSpaceAlert.TryGetValue(key, out var lastTempDb) || now - lastTempDb >= AlertCooldown))
+                    if (!suppressPopups && (!_lastTempDbSpaceAlert.TryGetValue(key, out var lastTempDb) || now - lastTempDb >= alertCooldown))
                     {
                         _trayService.ShowNotification(
                             "TempDB Space",
@@ -1222,7 +1273,9 @@ public partial class MainWindow : Window
                             $"{tempDb.UsedPercent:F0}% used ({tempDb.TotalReservedMb:F0} MB)",
                             $"{App.AlertTempDbSpaceThresholdPercent}%",
                             summary.ServerId,
-                            tempDbContext);
+                            tempDbContext,
+                            numericCurrentValue: tempDb.UsedPercent,
+                            numericThresholdValue: App.AlertTempDbSpaceThresholdPercent);
                     }
                 }
                 else if (_activeTempDbSpaceAlert.TryGetValue(key, out var wasTempDb) && wasTempDb)
@@ -1254,7 +1307,7 @@ public partial class MainWindow : Window
                     var worst = anomalousJobs[0];
                     var jobKey = $"{key}:{worst.JobId}:{worst.StartTime:O}";
 
-                    if (!suppressPopups && (!_lastLongRunningJobAlert.TryGetValue(jobKey, out var lastJob) || now - lastJob >= AlertCooldown))
+                    if (!suppressPopups && (!_lastLongRunningJobAlert.TryGetValue(jobKey, out var lastJob) || now - lastJob >= alertCooldown))
                     {
                         var currentMinutes = worst.CurrentDurationSeconds / 60;
                         _trayService.ShowNotification(
@@ -1271,7 +1324,9 @@ public partial class MainWindow : Window
                             $"{anomalousJobs.Count} job(s) exceeding {App.AlertLongRunningJobMultiplier}x average",
                             $"{App.AlertLongRunningJobMultiplier}x historical avg",
                             summary.ServerId,
-                            jobContext);
+                            jobContext,
+                            numericCurrentValue: (double)(worst.PercentOfAverage ?? 0),
+                            numericThresholdValue: App.AlertLongRunningJobMultiplier * 100);
                     }
                 }
                 else if (_activeLongRunningJobAlert.TryGetValue(key, out var wasJob) && wasJob)
@@ -1305,6 +1360,16 @@ public partial class MainWindow : Window
 
                 var events = await _dataService.GetRecentBlockedProcessReportsAsync(serverId, hoursBack: 1);
                 if (events == null || events.Count == 0) return null;
+
+                if (App.AlertExcludedDatabases.Count > 0)
+                {
+                    events = events
+                        .Where(e => string.IsNullOrEmpty(e.DatabaseName) ||
+                            !App.AlertExcludedDatabases.Any(ex =>
+                                string.Equals(ex, e.DatabaseName, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (events.Count == 0) return null;
+                }
 
                 var context = new AlertContext();
                 var firstXml = (string?)null;
@@ -1356,6 +1421,14 @@ public partial class MainWindow : Window
                 var deadlocks = await _dataService.GetRecentDeadlocksAsync(serverId, hoursBack: 1);
                 if (deadlocks == null || deadlocks.Count == 0) return null;
 
+                if (App.AlertExcludedDatabases.Count > 0)
+                {
+                    deadlocks = deadlocks
+                        .Where(d => !IsDeadlockExcluded(d, App.AlertExcludedDatabases))
+                        .ToList();
+                    if (deadlocks.Count == 0) return null;
+                }
+
                 var context = new AlertContext();
                 var firstGraph = (string?)null;
 
@@ -1390,6 +1463,24 @@ public partial class MainWindow : Window
                 AppLogger.Error("EmailAlert", $"Failed to fetch deadlock detail for email: {ex.Message}");
                 return null;
             }
+        }
+
+        private static bool IsDeadlockExcluded(DeadlockRow row, List<string> excludedDatabases)
+        {
+            if (string.IsNullOrEmpty(row.DeadlockGraphXml)) return false;
+            try
+            {
+                var doc = XElement.Parse(row.DeadlockGraphXml);
+                var dbNames = doc.Descendants("process")
+                    .Select(p => p.Attribute("currentdbname")?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Cast<string>()
+                    .ToList();
+                if (dbNames.Count == 0) return false;
+                return dbNames.All(db => excludedDatabases.Any(e =>
+                    string.Equals(e, db, StringComparison.OrdinalIgnoreCase)));
+            }
+            catch { return false; }
         }
 
         private static AlertContext? BuildPoisonWaitContext(List<PoisonWaitDelta> triggeredWaits)
