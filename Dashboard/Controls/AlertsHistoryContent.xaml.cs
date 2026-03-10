@@ -482,6 +482,7 @@ namespace PerformanceMonitorDashboard.Controls
                 ServerName = item.ServerName,
                 MetricName = item.MetricName
             };
+            context.PopulateFromDetailText(item.DetailText);
 
             var dialog = new MuteRuleDialog(context) { Owner = Window.GetWindow(this) };
             if (dialog.ShowDialog() == true)
