@@ -64,7 +64,8 @@
 
         <!-- Metric Name -->
         <TextBlock Grid.Row="11" Text="Metric" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
-        <ComboBox Grid.Row="12" x:Name="MetricCombo" SelectedIndex="0" Margin="0,0,0,8">
+        <ComboBox Grid.Row="12" x:Name="MetricCombo" SelectedIndex="0" Margin="0,0,0,8"
+                  SelectionChanged="MetricCombo_SelectionChanged">
             <ComboBoxItem Content="(any)"/>
             <ComboBoxItem Content="Blocking Detected"/>
             <ComboBoxItem Content="Deadlocks Detected"/>
@@ -76,7 +77,7 @@
         </ComboBox>
 
         <!-- Pattern fields -->
-        <Grid Grid.Row="13" Margin="0,0,0,8">
+        <Grid Grid.Row="13" x:Name="PatternFieldsGrid" Margin="0,0,0,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="8"/>
@@ -89,16 +90,16 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="Database (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
+            <TextBlock Grid.Row="0" Grid.Column="0" x:Name="DatabaseLabel" Text="Database (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
             <TextBox Grid.Row="1" Grid.Column="0" x:Name="DatabasePatternBox" Margin="0,0,0,8"/>
 
-            <TextBlock Grid.Row="0" Grid.Column="2" Text="Wait Type (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
+            <TextBlock Grid.Row="0" Grid.Column="2" x:Name="WaitTypeLabel" Text="Wait Type (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
             <TextBox Grid.Row="1" Grid.Column="2" x:Name="WaitTypePatternBox" Margin="0,0,0,8"/>
 
-            <TextBlock Grid.Row="2" Grid.Column="0" Text="Query Text (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" x:Name="QueryTextLabel" Text="Query Text (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
             <TextBox Grid.Row="3" Grid.Column="0" x:Name="QueryTextPatternBox" Margin="0,0,0,8"/>
 
-            <TextBlock Grid.Row="2" Grid.Column="2" Text="Job Name (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
+            <TextBlock Grid.Row="2" Grid.Column="2" x:Name="JobNameLabel" Text="Job Name (substring)" Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,4"/>
             <TextBox Grid.Row="3" Grid.Column="2" x:Name="JobNamePatternBox" Margin="0,0,0,8"/>
         </Grid>
 

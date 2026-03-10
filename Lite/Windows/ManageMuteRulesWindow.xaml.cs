@@ -52,13 +52,17 @@ public partial class ManageMuteRulesWindow : Window
     private async void ToggleRule_Click(object sender, RoutedEventArgs e)
     {
         if (RulesGrid.SelectedItem is not MuteRule selected) return;
+        var index = RulesGrid.SelectedIndex;
         await _muteRuleService.SetRuleEnabledAsync(selected.Id, !selected.Enabled);
         RefreshList();
+        if (index < _rules.Count) RulesGrid.SelectedIndex = index;
+        RulesGrid.Focus();
     }
 
     private async void DeleteRule_Click(object sender, RoutedEventArgs e)
     {
         if (RulesGrid.SelectedItem is not MuteRule selected) return;
+        var index = RulesGrid.SelectedIndex;
         var result = MessageBox.Show(
             $"Delete this mute rule?\n\n{selected.Summary}",
             "Confirm Delete",
@@ -69,6 +73,9 @@ public partial class ManageMuteRulesWindow : Window
         {
             await _muteRuleService.RemoveRuleAsync(selected.Id);
             _rules.Remove(selected);
+            if (_rules.Count > 0)
+                RulesGrid.SelectedIndex = Math.Min(index, _rules.Count - 1);
+            RulesGrid.Focus();
         }
     }
 

@@ -95,10 +95,15 @@ public partial class MuteRuleDialog : Window
     {
         Rule.Reason = string.IsNullOrWhiteSpace(ReasonBox.Text) ? null : ReasonBox.Text.Trim();
         Rule.ServerName = string.IsNullOrWhiteSpace(ServerNameBox.Text) ? null : ServerNameBox.Text.Trim();
-        Rule.DatabasePattern = string.IsNullOrWhiteSpace(DatabasePatternBox.Text) ? null : DatabasePatternBox.Text.Trim();
-        Rule.QueryTextPattern = string.IsNullOrWhiteSpace(QueryTextPatternBox.Text) ? null : QueryTextPatternBox.Text.Trim();
-        Rule.WaitTypePattern = string.IsNullOrWhiteSpace(WaitTypePatternBox.Text) ? null : WaitTypePatternBox.Text.Trim();
-        Rule.JobNamePattern = string.IsNullOrWhiteSpace(JobNamePatternBox.Text) ? null : JobNamePatternBox.Text.Trim();
+
+        Rule.DatabasePattern = DatabasePatternBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(DatabasePatternBox.Text)
+            ? DatabasePatternBox.Text.Trim() : null;
+        Rule.QueryTextPattern = QueryTextPatternBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(QueryTextPatternBox.Text)
+            ? QueryTextPatternBox.Text.Trim() : null;
+        Rule.WaitTypePattern = WaitTypePatternBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(WaitTypePatternBox.Text)
+            ? WaitTypePatternBox.Text.Trim() : null;
+        Rule.JobNamePattern = JobNamePatternBox.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(JobNamePatternBox.Text)
+            ? JobNamePatternBox.Text.Trim() : null;
 
         if (MetricCombo.SelectedIndex > 0 && MetricCombo.SelectedItem is ComboBoxItem selected)
             Rule.MetricName = selected.Content?.ToString();
@@ -119,5 +124,25 @@ public partial class MuteRuleDialog : Window
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void MetricCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DatabasePatternBox == null) return;
+
+        var metric = (MetricCombo.SelectedItem as ComboBoxItem)?.Content?.ToString();
+
+        bool showDatabase = metric is null or "(any)" or "Blocking Detected" or "Deadlocks Detected" or "Long-Running Query";
+        bool showWaitType = metric is null or "(any)" or "Poison Wait" or "Long-Running Query";
+        bool showQueryText = metric is null or "(any)" or "Blocking Detected" or "Long-Running Query";
+        bool showJobName = metric is null or "(any)" or "Long-Running Job";
+
+        DatabaseLabel.Visibility = DatabasePatternBox.Visibility = showDatabase ? Visibility.Visible : Visibility.Collapsed;
+        WaitTypeLabel.Visibility = WaitTypePatternBox.Visibility = showWaitType ? Visibility.Visible : Visibility.Collapsed;
+        QueryTextLabel.Visibility = QueryTextPatternBox.Visibility = showQueryText ? Visibility.Visible : Visibility.Collapsed;
+        JobNameLabel.Visibility = JobNamePatternBox.Visibility = showJobName ? Visibility.Visible : Visibility.Collapsed;
+
+        PatternFieldsGrid.Visibility = (showDatabase || showWaitType || showQueryText || showJobName)
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 }

@@ -6,6 +6,7 @@
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
 
+using System;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -52,13 +53,17 @@ namespace PerformanceMonitorDashboard
         private void ToggleRule_Click(object sender, RoutedEventArgs e)
         {
             if (RulesGrid.SelectedItem is not MuteRule selected) return;
+            var index = RulesGrid.SelectedIndex;
             _muteRuleService.SetRuleEnabled(selected.Id, !selected.Enabled);
             RefreshList();
+            if (index < _rules.Count) RulesGrid.SelectedIndex = index;
+            RulesGrid.Focus();
         }
 
         private void DeleteRule_Click(object sender, RoutedEventArgs e)
         {
             if (RulesGrid.SelectedItem is not MuteRule selected) return;
+            var index = RulesGrid.SelectedIndex;
             var result = MessageBox.Show(
                 $"Delete this mute rule?\n\n{selected.Summary}",
                 "Confirm Delete",
@@ -69,6 +74,9 @@ namespace PerformanceMonitorDashboard
             {
                 _muteRuleService.RemoveRule(selected.Id);
                 _rules.Remove(selected);
+                if (_rules.Count > 0)
+                    RulesGrid.SelectedIndex = Math.Min(index, _rules.Count - 1);
+                RulesGrid.Focus();
             }
         }
 
