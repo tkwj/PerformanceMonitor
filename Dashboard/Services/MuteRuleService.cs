@@ -13,6 +13,8 @@ namespace PerformanceMonitorDashboard.Services
     /// </summary>
     public class MuteRuleService
     {
+        private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
+
         private readonly string _filePath;
         private readonly object _lock = new object();
         private List<MuteRule> _rules = new();
@@ -131,8 +133,7 @@ namespace PerformanceMonitorDashboard.Services
         {
             try
             {
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(_rules, options);
+                var json = JsonSerializer.Serialize(_rules, s_jsonOptions);
                 File.WriteAllText(_filePath, json);
             }
             catch
