@@ -99,7 +99,7 @@ public partial class ManageMuteRulesWindow : Window
     {
         if (sender is CheckBox cb && cb.DataContext is MuteRule rule)
         {
-            await _muteRuleService.SetRuleEnabledAsync(rule.Id, rule.Enabled);
+            await _muteRuleService.SetRuleEnabledAsync(rule.Id, cb.IsChecked == true);
         }
     }
 

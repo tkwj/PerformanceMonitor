@@ -100,7 +100,7 @@ namespace PerformanceMonitorDashboard
         {
             if (sender is CheckBox cb && cb.DataContext is MuteRule rule)
             {
-                _muteRuleService.SetRuleEnabled(rule.Id, rule.Enabled);
+                _muteRuleService.SetRuleEnabled(rule.Id, cb.IsChecked == true);
             }
         }
 

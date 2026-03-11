@@ -323,10 +323,18 @@ public partial class MainWindow : Window
     private void UpdateStatusBar()
     {
         // Update database size
-        var sizeMb = _databaseInitializer.GetDatabaseSizeMb();
-        DatabaseSizeText.Text = sizeMb > 0
-            ? $"Database: {sizeMb:F1} MB"
-            : "Database: New";
+        var fileSizeMb = _databaseInitializer.GetDatabaseSizeMb();
+        var usedSizeMb = _databaseInitializer.GetUsedDataSizeMb();
+        if (fileSizeMb > 0)
+        {
+            DatabaseSizeText.Text = usedSizeMb.HasValue
+                ? $"Database: {usedSizeMb.Value:F1} / {fileSizeMb:F1} MB"
+                : $"Database: {fileSizeMb:F1} MB";
+        }
+        else
+        {
+            DatabaseSizeText.Text = "Database: New";
+        }
 
         // Update collection status
         if (_backgroundService != null)
@@ -1036,13 +1044,16 @@ public partial class MainWindow : Window
                         Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Warning);
                 }
 
+                var cpuDetailText = $"  CPU: {summary.CpuPercent:F0}%\n  Threshold: {App.AlertCpuThreshold}%";
+
                 await _emailAlertService.TrySendAlertEmailAsync(
                     "High CPU",
                     summary.DisplayName,
                     $"{summary.CpuPercent:F0}%",
                     $"{App.AlertCpuThreshold}%",
                     summary.ServerId,
-                    muted: isMuted);
+                    muted: isMuted,
+                    detailText: cpuDetailText);
             }
         }
         else if (_activeCpuAlert.TryGetValue(key, out var wasCpu) && wasCpu)

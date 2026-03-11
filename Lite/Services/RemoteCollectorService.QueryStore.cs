@@ -41,7 +41,8 @@ DECLARE
 
 DECLARE
     @db sysname,
-    @sql NVARCHAR(500);
+    @sql NVARCHAR(500),
+    @exec_sp nvarchar(256);
 
 DECLARE db_check CURSOR LOCAL FAST_FORWARD FOR
     SELECT /* PerformanceMonitorLite */
@@ -70,8 +71,7 @@ INTO @db;
 WHILE @@FETCH_STATUS = 0
 BEGIN
     BEGIN TRY
-        SET @sql =
-            N'USE ' + QUOTENAME(@db) + N';
+        SET @sql = N'
             SELECT ' + QUOTENAME(@db, '''') + N'
             WHERE EXISTS
             (
@@ -81,8 +81,10 @@ BEGIN
                 WHERE actual_state > 0
             );';
 
+        SET @exec_sp = QUOTENAME(@db) + N'.sys.sp_executesql';
+
         INSERT @result (name)
-        EXEC(@sql);
+        EXECUTE @exec_sp @sql;
     END TRY
     BEGIN CATCH
     END CATCH;
@@ -110,7 +112,8 @@ DECLARE
 
 DECLARE
     @db sysname,
-    @sql NVARCHAR(500);
+    @sql NVARCHAR(500),
+    @exec_sp nvarchar(256);
 
 DECLARE db_check CURSOR LOCAL FAST_FORWARD FOR
     SELECT /* PerformanceMonitorLite */
@@ -131,8 +134,7 @@ INTO @db;
 WHILE @@FETCH_STATUS = 0
 BEGIN
     BEGIN TRY
-        SET @sql =
-            N'USE ' + QUOTENAME(@db) + N';
+        SET @sql = N'
             SELECT ' + QUOTENAME(@db, '''') + N'
             WHERE EXISTS
             (
@@ -142,8 +144,10 @@ BEGIN
                 WHERE actual_state > 0
             );';
 
+        SET @exec_sp = QUOTENAME(@db) + N'.sys.sp_executesql';
+
         INSERT @result (name)
-        EXEC(@sql);
+        EXECUTE @exec_sp @sql;
     END TRY
     BEGIN CATCH
     END CATCH;
@@ -311,7 +315,7 @@ EXECUTE [{escapedDbName}].sys.sp_executesql
          force_failure_count = qsp.force_failure_count,
          last_force_failure_reason = qsp.last_force_failure_reason_desc,
          compatibility_level = qsp.compatibility_level,
-         query_plan_text = CONVERT(nvarchar(max), qsp.query_plan),
+         query_plan_text = CONVERT(nvarchar(1), NULL),
          query_plan_hash = CONVERT(varchar(64), qsp.query_plan_hash, 1)
      FROM sys.query_store_runtime_stats AS qsrs
      JOIN sys.query_store_plan AS qsp
@@ -322,7 +326,7 @@ EXECUTE [{escapedDbName}].sys.sp_executesql
        ON qst.query_text_id = qsq.query_text_id
      WHERE qsrs.last_execution_time > @cutoff_time
      AND   qst.query_sql_text NOT LIKE N''%PerformanceMonitorLite%''
-     OPTION(RECOMPILE);',
+     OPTION(RECOMPILE, LOOP JOIN);',
     N'@cutoff_time datetime2(7)',
     @cutoff_time;";
 
@@ -335,11 +339,18 @@ EXECUTE [{escapedDbName}].sys.sp_executesql
                     sqlSw.Stop();
 
                     duckSw.Start();
+                    var flushSw = new Stopwatch();
+                    var readerSw = new Stopwatch();
+                    var appendSw = new Stopwatch();
 
                     using (var appender = duckConnection.CreateAppender("query_store_stats"))
                     {
-                        while (await reader.ReadAsync(cancellationToken))
+                        while (true)
                         {
+                            readerSw.Start();
+                            var hasRow = await reader.ReadAsync(cancellationToken);
+                            readerSw.Stop();
+                            if (!hasRow) break;
                             /* Reader ordinals match SELECT column order:
                                0=query_id, 1=plan_id, 2=execution_type_desc,
                                3=first_execution_time (dto), 4=last_execution_time (dto),
@@ -360,6 +371,7 @@ EXECUTE [{escapedDbName}].sys.sp_executesql
                                46=is_forced_plan, 47=force_failure_count, 48=last_force_failure_reason,
                                49=compatibility_level, 50=query_plan_text, 51=query_plan_hash */
 
+                            appendSw.Start();
                             var row = appender.CreateRow();
                             row.AppendValue(GenerateCollectionId())                                                             /* collection_id */
                                .AppendValue(collectionTime)                                                                     /* collection_time */
@@ -419,12 +431,28 @@ EXECUTE [{escapedDbName}].sys.sp_executesql
                                .AppendValue(reader.IsDBNull(50) ? (string?)null : reader.GetString(50))                         /* query_plan_text */
                                .AppendValue(reader.IsDBNull(51) ? (string?)null : reader.GetString(51))                         /* query_plan_hash */
                                .EndRow();
+                            appendSw.Stop();
 
                             totalRows++;
                         }
-                    }
+
+                        flushSw.Start();
+                    } /* appender.Dispose() flushes here */
+                    flushSw.Stop();
 
                     duckSw.Stop();
+
+                    if (duckSw.ElapsedMilliseconds > 2000)
+                    {
+                        _logger?.LogWarning(
+                            "Query Store DuckDB write spike: {TotalMs}ms total (reader: {ReaderMs}ms, append: {AppendMs}ms, flush: {FlushMs}ms, rows: {Rows}, db: {Db})",
+                            duckSw.ElapsedMilliseconds,
+                            readerSw.ElapsedMilliseconds,
+                            appendSw.ElapsedMilliseconds,
+                            flushSw.ElapsedMilliseconds,
+                            totalRows,
+                            dbName);
+                    }
                 }
                 catch (SqlException ex)
                 {

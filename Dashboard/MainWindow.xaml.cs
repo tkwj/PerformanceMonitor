@@ -212,7 +212,7 @@ namespace PerformanceMonitorDashboard
                     return;
                 }
 
-                _mcpHostService = new McpHostService(_serverManager, _credentialService, _muteRuleService, prefs.McpPort);
+                _mcpHostService = new McpHostService(_serverManager, _credentialService, _muteRuleService, _preferencesService, prefs.McpPort);
                 _mcpCts = new CancellationTokenSource();
                 _ = _mcpHostService.StartAsync(_mcpCts.Token);
             }
