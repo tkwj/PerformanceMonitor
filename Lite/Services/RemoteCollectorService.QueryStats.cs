@@ -276,8 +276,8 @@ OPTION(RECOMPILE);";
                        .AppendValue(reader.IsDBNull(19) ? 0L : reader.GetInt64(19))                         /* max_physical_reads */
                        .AppendValue(reader.IsDBNull(20) ? 0L : reader.GetInt64(20))                         /* min_rows */
                        .AppendValue(reader.IsDBNull(21) ? 0L : reader.GetInt64(21))                         /* max_rows */
-                       .AppendValue(reader.IsDBNull(22) ? 0 : Convert.ToInt32(reader.GetValue(22)))         /* min_dop */
-                       .AppendValue(reader.IsDBNull(23) ? 0 : Convert.ToInt32(reader.GetValue(23)))         /* max_dop */
+                       .AppendValue(reader.IsDBNull(22) ? 0L : Convert.ToInt64(reader.GetValue(22)))        /* min_dop */
+                       .AppendValue(reader.IsDBNull(23) ? 0L : Convert.ToInt64(reader.GetValue(23)))        /* max_dop */
                        .AppendValue(reader.IsDBNull(24) ? 0L : reader.GetInt64(24))                         /* min_grant_kb */
                        .AppendValue(reader.IsDBNull(25) ? 0L : reader.GetInt64(25))                         /* max_grant_kb */
                        .AppendValue(reader.IsDBNull(26) ? 0L : reader.GetInt64(26))                         /* min_used_grant_kb */
