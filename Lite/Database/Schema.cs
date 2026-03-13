@@ -348,7 +348,7 @@ CREATE TABLE IF NOT EXISTS tempdb_stats (
     version_store_reserved_mb DECIMAL(18,2),
     total_reserved_mb DECIMAL(18,2),
     unallocated_mb DECIMAL(18,2),
-    total_sessions_using_tempdb INTEGER,
+    total_sessions_using_tempdb BIGINT,
     top_session_id INTEGER,
     top_session_tempdb_mb DECIMAL(18,2)
 )";
@@ -652,7 +652,7 @@ CREATE TABLE IF NOT EXISTS session_stats (
     server_id INTEGER NOT NULL,
     server_name VARCHAR NOT NULL,
     program_name VARCHAR NOT NULL,
-    connection_count INTEGER NOT NULL,
+    connection_count BIGINT NOT NULL,
     running_count INTEGER NOT NULL,
     sleeping_count INTEGER NOT NULL,
     dormant_count INTEGER NOT NULL,
