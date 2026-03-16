@@ -77,6 +77,12 @@ public class ServerConnection
     public string? DatabaseName { get; set; }
 
     /// <summary>
+    /// Optional database where community stored procedures (sp_IndexCleanup) are installed.
+    /// When null or empty, falls back to the connection database.
+    /// </summary>
+    public string? UtilityDatabase { get; set; }
+
+    /// <summary>
     /// When true, sets ApplicationIntent=ReadOnly on the connection string.
     /// Required for connecting to AG listener read-only replicas and
     /// Azure SQL Business Critical / Managed Instance built-in read replicas.
@@ -165,6 +171,24 @@ public class ServerConnection
         }
 
         return BuildConnectionString(username, password);
+    }
+
+    /// <summary>
+    /// Returns a connection string targeting UtilityDatabase if set, otherwise falls back to GetConnectionString().
+    /// Used for locating community stored procedures (sp_IndexCleanup) that may be installed in a non-default database.
+    /// </summary>
+    public string GetUtilityConnectionString(CredentialService credentialService)
+    {
+        var baseConnStr = GetConnectionString(credentialService);
+
+        if (string.IsNullOrWhiteSpace(UtilityDatabase))
+            return baseConnStr;
+
+        var builder = new SqlConnectionStringBuilder(baseConnStr)
+        {
+            InitialCatalog = UtilityDatabase
+        };
+        return builder.ConnectionString;
     }
 
     /// <summary>

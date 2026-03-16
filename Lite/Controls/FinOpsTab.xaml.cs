@@ -153,10 +153,12 @@ public partial class FinOpsTab : UserControl
 
         try
         {
-            var connectionString = (ServerSelector.SelectedItem as Models.ServerConnection)?.GetConnectionString(_credentialService);
+            var selectedServer = ServerSelector.SelectedItem as Models.ServerConnection;
+            var connectionString = selectedServer?.GetConnectionString(_credentialService);
             if (string.IsNullOrEmpty(connectionString)) return;
 
-            var data = await _dataService.GetRecommendationsAsync(serverId, connectionString, _currentServerMonthlyCost);
+            var utilityConnectionString = selectedServer!.GetUtilityConnectionString(_credentialService);
+            var data = await _dataService.GetRecommendationsAsync(serverId, connectionString, utilityConnectionString, _currentServerMonthlyCost);
             RecommendationsDataGrid.ItemsSource = data;
             RecommendationsNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             RecommendationsCountIndicator.Text = data.Count > 0 ? $"{data.Count} recommendation(s)" : "";
@@ -747,9 +749,9 @@ public partial class FinOpsTab : UserControl
 
         try
         {
-            var connectionString = server.GetConnectionString(_credentialService);
+            var utilityConnectionString = server.GetUtilityConnectionString(_credentialService);
 
-            var exists = await LocalDataService.CheckSpIndexCleanupExistsAsync(connectionString);
+            var exists = await LocalDataService.CheckSpIndexCleanupExistsAsync(utilityConnectionString);
             if (!exists)
             {
                 IndexAnalysisNotInstalledMessage.Visibility = Visibility.Visible;
@@ -768,7 +770,7 @@ public partial class FinOpsTab : UserControl
             var getAllDatabases = IndexAnalysisAllDatabases.IsChecked == true;
 
             var (details, summaries) = await LocalDataService.RunIndexAnalysisAsync(
-                connectionString,
+                utilityConnectionString,
                 string.IsNullOrWhiteSpace(databaseName) ? null : databaseName,
                 getAllDatabases);
 

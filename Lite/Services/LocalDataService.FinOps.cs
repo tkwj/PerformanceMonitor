@@ -1474,7 +1474,7 @@ ORDER BY CAST(collection_time AS DATE)";
     /// Runs all Phase 1 recommendation checks and returns a consolidated list.
     /// Uses DuckDB for collected data and live SQL queries for server-specific checks.
     /// </summary>
-    public async Task<List<RecommendationRow>> GetRecommendationsAsync(int serverId, string connectionString, decimal monthlyCost)
+    public async Task<List<RecommendationRow>> GetRecommendationsAsync(int serverId, string connectionString, string utilityConnectionString, decimal monthlyCost)
     {
         var recommendations = new List<RecommendationRow>();
 
@@ -1583,7 +1583,7 @@ FROM sys.dm_db_persisted_sku_features", sqlConn);
         // 4. Unused index cost quantification (live SQL query)
         try
         {
-            var spExists = await CheckSpIndexCleanupExistsAsync(connectionString);
+            var spExists = await CheckSpIndexCleanupExistsAsync(utilityConnectionString);
             if (!spExists)
             {
                 recommendations.Add(new RecommendationRow
