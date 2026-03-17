@@ -2203,6 +2203,198 @@ ORDER BY SUM(CAST(is_running_long AS int)) DESC", connection);
                 Logger.Error($"Recommendation check failed (Maintenance window): {ex.Message}", ex);
             }
 
+            // 12. VM right-sizing — prescriptive core/memory targets
+            try
+            {
+                using var vmCmd = new SqlCommand(@"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT
+    p95_cpu = (SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cus.sqlserver_cpu_utilization)
+               FROM collect.cpu_utilization_stats AS cus
+               WHERE cus.collection_time >= DATEADD(DAY, -7, SYSDATETIME())),
+    cpu_count = (SELECT si.cpu_count FROM sys.dm_os_sys_info AS si),
+    buffer_pool_mb = (SELECT pc.cntr_value / 1024
+                      FROM sys.dm_os_performance_counters AS pc
+                      WHERE pc.counter_name = N'Database Cache Memory (KB)'
+                      AND   pc.object_name LIKE N'%Buffer Manager%'),
+    physical_memory_mb = (SELECT si.physical_memory_kb / 1024 FROM sys.dm_os_sys_info AS si)
+OPTION(MAXDOP 1, RECOMPILE);", connection);
+                vmCmd.CommandTimeout = 60;
+
+                using var vmReader = await vmCmd.ExecuteReaderAsync();
+                if (await vmReader.ReadAsync())
+                {
+                    var p95Cpu = vmReader.IsDBNull(0) ? 0m : Convert.ToDecimal(vmReader.GetValue(0));
+                    var cpuCount = vmReader.IsDBNull(1) ? 0 : Convert.ToInt32(vmReader.GetValue(1));
+                    var bpMb = vmReader.IsDBNull(2) ? 0 : Convert.ToInt32(vmReader.GetValue(2));
+                    var physMb = vmReader.IsDBNull(3) ? 0 : Convert.ToInt32(vmReader.GetValue(3));
+
+                    // CPU prescription: only if >= 4 cores
+                    if (cpuCount >= 4)
+                    {
+                        int targetCores = 0;
+                        if (p95Cpu < 15)
+                            targetCores = Math.Max(2, cpuCount / 4);
+                        else if (p95Cpu < 30)
+                            targetCores = Math.Max(2, cpuCount / 2);
+
+                        if (targetCores > 0 && targetCores < cpuCount)
+                        {
+                            recommendations.Add(new FinOpsRecommendation
+                            {
+                                Category = "Hardware",
+                                Severity = "Medium",
+                                Confidence = "Medium",
+                                Finding = $"CPU: reduce from {cpuCount} to {targetCores} cores (P95 CPU {p95Cpu:N1}%)",
+                                Detail = $"Over the last 7 days, P95 CPU utilization was {p95Cpu:N1}%. " +
+                                         $"Current allocation of {cpuCount} cores can safely be reduced to {targetCores} cores.",
+                                EstMonthlySavings = monthlyCost > 0
+                                    ? monthlyCost * (1m - (decimal)targetCores / cpuCount) * 0.50m
+                                    : null
+                            });
+                        }
+                    }
+
+                    // Memory prescription: only if >= 4096 MB
+                    if (physMb >= 4096 && physMb > 0)
+                    {
+                        var bpRatio = (decimal)bpMb / physMb;
+                        int targetMb = 0;
+                        if (bpRatio < 0.25m)
+                            targetMb = Math.Max(4096, physMb / 4);
+                        else if (bpRatio < 0.40m)
+                            targetMb = Math.Max(4096, physMb / 2);
+
+                        if (targetMb > 0 && targetMb < physMb)
+                        {
+                            recommendations.Add(new FinOpsRecommendation
+                            {
+                                Category = "Hardware",
+                                Severity = "Medium",
+                                Confidence = "Medium",
+                                Finding = $"Memory: reduce from {physMb / 1024}GB to {targetMb / 1024}GB (buffer pool uses {bpRatio:P0})",
+                                Detail = $"Buffer pool is using {bpMb:N0} MB of {physMb:N0} MB physical RAM ({bpRatio:P0}). " +
+                                         $"Reducing to {targetMb / 1024}GB would still leave headroom.",
+                                EstMonthlySavings = monthlyCost > 0
+                                    ? monthlyCost * (1m - (decimal)targetMb / physMb) * 0.30m
+                                    : null
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Recommendation check failed (VM right-sizing): {ex.Message}", ex);
+            }
+
+            // 13. Storage tier optimization — flag databases with low IO latency
+            try
+            {
+                using var storageCmd = new SqlCommand(@"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT
+    database_name = fio.database_name,
+    total_reads = SUM(fio.num_of_reads_delta),
+    total_stall_read_ms = SUM(fio.io_stall_read_ms_delta),
+    total_writes = SUM(fio.num_of_writes_delta),
+    total_stall_write_ms = SUM(fio.io_stall_write_ms_delta)
+FROM collect.file_io_stats AS fio
+WHERE fio.collection_time >= DATEADD(DAY, -7, SYSDATETIME())
+AND   fio.num_of_reads_delta > 0
+GROUP BY
+    fio.database_name
+HAVING SUM(fio.num_of_reads_delta) > 1000
+ORDER BY
+    SUM(fio.io_stall_read_ms_delta) * 1.0 / SUM(fio.num_of_reads_delta)
+OPTION(MAXDOP 1, RECOMPILE);", connection);
+                storageCmd.CommandTimeout = 60;
+
+                var lowLatencyDbs = new List<(string Name, decimal AvgReadMs, decimal AvgWriteMs)>();
+                using var storageReader = await storageCmd.ExecuteReaderAsync();
+                while (await storageReader.ReadAsync())
+                {
+                    var dbName = storageReader.IsDBNull(0) ? "" : storageReader.GetString(0);
+                    var totalReads = storageReader.IsDBNull(1) ? 0L : Convert.ToInt64(storageReader.GetValue(1));
+                    var totalStallRead = storageReader.IsDBNull(2) ? 0L : Convert.ToInt64(storageReader.GetValue(2));
+                    var totalWrites = storageReader.IsDBNull(3) ? 0L : Convert.ToInt64(storageReader.GetValue(3));
+                    var totalStallWrite = storageReader.IsDBNull(4) ? 0L : Convert.ToInt64(storageReader.GetValue(4));
+
+                    var avgReadMs = totalReads > 0 ? (decimal)totalStallRead / totalReads : 0m;
+                    var avgWriteMs = totalWrites > 0 ? (decimal)totalStallWrite / totalWrites : 0m;
+
+                    if (avgReadMs < 5m && avgWriteMs < 3m)
+                    {
+                        lowLatencyDbs.Add((dbName, avgReadMs, avgWriteMs));
+                    }
+                }
+
+                if (lowLatencyDbs.Count > 0)
+                {
+                    var detail = string.Join("; ", lowLatencyDbs.Take(10)
+                        .Select(d => $"{d.Name} (read {d.AvgReadMs:N1}ms, write {d.AvgWriteMs:N1}ms)"));
+                    recommendations.Add(new FinOpsRecommendation
+                    {
+                        Category = "Storage",
+                        Severity = "Low",
+                        Confidence = "Medium",
+                        Finding = $"{lowLatencyDbs.Count} database(s) with low IO latency — standard storage may suffice",
+                        Detail = $"These databases have avg read latency under 5ms and write under 3ms over 7 days: {detail}" +
+                                 (lowLatencyDbs.Count > 10 ? $" and {lowLatencyDbs.Count - 10} more" : "") +
+                                 ". Premium/high-performance storage may not be needed."
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Recommendation check failed (Storage tier): {ex.Message}", ex);
+            }
+
+            // 14. Reserved capacity candidates — stable CPU utilization
+            try
+            {
+                using var rcCmd = new SqlCommand(@"
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SELECT
+    avg_cpu = AVG(CAST(cus.sqlserver_cpu_utilization AS decimal(5,2))),
+    stddev_cpu = STDEV(CAST(cus.sqlserver_cpu_utilization AS decimal(5,2))),
+    sample_count = COUNT(*)
+FROM collect.cpu_utilization_stats AS cus
+WHERE cus.collection_time >= DATEADD(DAY, -7, SYSDATETIME())
+HAVING COUNT(*) >= 24
+OPTION(MAXDOP 1, RECOMPILE);", connection);
+                rcCmd.CommandTimeout = 60;
+
+                using var rcReader = await rcCmd.ExecuteReaderAsync();
+                if (await rcReader.ReadAsync() && !rcReader.IsDBNull(0))
+                {
+                    var avgCpu = Convert.ToDecimal(rcReader.GetValue(0));
+                    var stddevCpu = rcReader.IsDBNull(1) ? 0m : Convert.ToDecimal(rcReader.GetValue(1));
+
+                    if (avgCpu > 20 && stddevCpu > 0)
+                    {
+                        var cv = stddevCpu / avgCpu;
+                        if (cv < 0.3m)
+                        {
+                            var confidence = cv < 0.15m ? "High" : "Medium";
+                            recommendations.Add(new FinOpsRecommendation
+                            {
+                                Category = "Cloud",
+                                Severity = "Low",
+                                Confidence = confidence,
+                                Finding = $"Stable CPU utilization (avg {avgCpu:N1}%, CV {cv:N2}) — reserved capacity candidate",
+                                Detail = $"CPU utilization is consistently {avgCpu:N1}% with low variance (\u00b1{stddevCpu:N1}%). " +
+                                         "Reserved pricing typically saves 30-40% over pay-as-you-go for predictable workloads."
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Recommendation check failed (Reserved capacity): {ex.Message}", ex);
+            }
+
             return recommendations;
         }
 

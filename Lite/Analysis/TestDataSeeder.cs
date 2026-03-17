@@ -1959,4 +1959,155 @@ VALUES ($1, $2, $3, $4, $5, true, $6, 120, 100, 130, 200, false, 120.0)";
 
         await normalCmd.ExecuteNonQueryAsync();
     }
+
+    // ============================================
+    // Phase 3 FinOps Test Scenarios
+    // ============================================
+
+    /// <summary>
+    /// Scenario 7: VM Right-Sizing Target.
+    /// 32 cores, 256GB RAM, but P95 CPU only 12%, buffer pool 50GB of 256GB (19%).
+    ///
+    /// Expected recommendations:
+    ///   - CPU: reduce from 32 to 8 cores (P95 &lt; 15% → /4)
+    ///   - Memory: reduce from 256GB to 64GB (ratio &lt; 25% → /4)
+    /// </summary>
+    public async Task SeedVmRightSizingTargetAsync()
+    {
+        await ClearTestDataAsync();
+        await SeedTestServerAsync();
+
+        // 32 cores, 256GB RAM, but P95 CPU only 12%, buffer pool 50GB of 256GB (19%)
+        // Should recommend: 8 cores (P95 < 15%), 64GB RAM (ratio < 25%)
+        await SeedCpuUtilizationAsync(12, 2);
+        await SeedMemoryStatsAsync(totalPhysicalMb: 262_144, bufferPoolMb: 51_200, targetMb: 245_760);
+        await SeedServerPropertiesAsync(cpuCount: 32, htRatio: 2, physicalMemMb: 262_144);
+        await SeedFileSizeAsync(totalDataSizeMb: 51_200);
+    }
+
+    /// <summary>
+    /// Scenario 8: Low IO Latency (Storage Tier).
+    /// Avg read latency 1ms, avg write latency 0.5ms — doesn't need premium storage.
+    ///
+    /// Expected recommendations:
+    ///   - Storage tier: database(s) with low IO latency — standard storage may suffice
+    /// </summary>
+    public async Task SeedLowIoLatencyAsync()
+    {
+        await ClearTestDataAsync();
+        await SeedTestServerAsync();
+
+        // Avg read latency 1ms, avg write latency 0.5ms — doesn't need premium storage
+        await SeedIoLatencyAsync(totalReads: 1_000_000, stallReadMs: 1_000_000,
+                                  totalWrites: 200_000, stallWriteMs: 100_000);
+    }
+
+    /// <summary>
+    /// Scenario 9: Stable CPU for Reserved Capacity.
+    /// 24+ samples all between 38-42% — very low variance, CV ~0.04.
+    ///
+    /// Expected recommendations:
+    ///   - Reserved capacity candidate (CV &lt; 0.15, avg &gt; 20%)
+    /// </summary>
+    public async Task SeedStableCpuForReservedCapacityAsync()
+    {
+        await ClearTestDataAsync();
+        await SeedTestServerAsync();
+
+        // 24+ samples all between 38-42% — very low variance, CV ~0.04
+        // Should trigger reserved capacity recommendation with "High" confidence
+        await SeedCpuUtilizationWithVarianceAsync(mean: 40, variance: 2);
+    }
+
+    /// <summary>
+    /// Scenario 10: Bursty CPU — should NOT trigger reserved capacity.
+    /// Alternating 5% and 85% — high CV, should NOT fire.
+    ///
+    /// Expected: no reserved capacity recommendation.
+    /// </summary>
+    public async Task SeedBurstyCpuAsync()
+    {
+        await ClearTestDataAsync();
+        await SeedTestServerAsync();
+
+        // Alternating 5% and 85% — high CV, should NOT trigger
+        await SeedCpuUtilizationAlternatingAsync(low: 5, high: 85);
+    }
+
+    // ============================================
+    // Phase 3 Seed Helpers
+    // ============================================
+
+    /// <summary>
+    /// Seeds CPU utilization with controlled variance around a mean value.
+    /// Produces 32 samples (8 hours at 15-min intervals) with values cycling
+    /// through mean-variance, mean, mean+variance, mean in a deterministic pattern.
+    /// </summary>
+    internal async Task SeedCpuUtilizationWithVarianceAsync(int mean, int variance)
+    {
+        using var readLock = _duckDb.AcquireReadLock();
+        using var connection = _duckDb.CreateConnection();
+        await connection.OpenAsync();
+
+        // Pattern: mean-variance, mean, mean+variance, mean — repeating
+        var offsets = new[] { -variance, 0, variance, 0 };
+
+        for (var i = 0; i < 32; i++)
+        {
+            var cpuValue = Math.Clamp(mean + offsets[i % 4], 0, 100);
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+INSERT INTO cpu_utilization_stats
+    (collection_id, collection_time, server_id, server_name,
+     sample_time, sqlserver_cpu_utilization, other_process_cpu_utilization)
+VALUES ($1, $2, $3, $4, $5, $6, $7)";
+
+            var t = TestPeriodStart.AddMinutes(i * 15);
+            cmd.Parameters.Add(new DuckDBParameter { Value = _nextId-- });
+            cmd.Parameters.Add(new DuckDBParameter { Value = t });
+            cmd.Parameters.Add(new DuckDBParameter { Value = TestServerId });
+            cmd.Parameters.Add(new DuckDBParameter { Value = TestServerName });
+            cmd.Parameters.Add(new DuckDBParameter { Value = t });
+            cmd.Parameters.Add(new DuckDBParameter { Value = cpuValue });
+            cmd.Parameters.Add(new DuckDBParameter { Value = 2 });
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    /// <summary>
+    /// Seeds CPU utilization alternating between low and high values.
+    /// Produces 32 samples with high coefficient of variation — should NOT
+    /// trigger reserved capacity recommendations.
+    /// </summary>
+    internal async Task SeedCpuUtilizationAlternatingAsync(int low, int high)
+    {
+        using var readLock = _duckDb.AcquireReadLock();
+        using var connection = _duckDb.CreateConnection();
+        await connection.OpenAsync();
+
+        for (var i = 0; i < 32; i++)
+        {
+            var cpuValue = i % 2 == 0 ? low : high;
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+INSERT INTO cpu_utilization_stats
+    (collection_id, collection_time, server_id, server_name,
+     sample_time, sqlserver_cpu_utilization, other_process_cpu_utilization)
+VALUES ($1, $2, $3, $4, $5, $6, $7)";
+
+            var t = TestPeriodStart.AddMinutes(i * 15);
+            cmd.Parameters.Add(new DuckDBParameter { Value = _nextId-- });
+            cmd.Parameters.Add(new DuckDBParameter { Value = t });
+            cmd.Parameters.Add(new DuckDBParameter { Value = TestServerId });
+            cmd.Parameters.Add(new DuckDBParameter { Value = TestServerName });
+            cmd.Parameters.Add(new DuckDBParameter { Value = t });
+            cmd.Parameters.Add(new DuckDBParameter { Value = cpuValue });
+            cmd.Parameters.Add(new DuckDBParameter { Value = 2 });
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
 }

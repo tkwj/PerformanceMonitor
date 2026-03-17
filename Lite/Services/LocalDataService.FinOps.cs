@@ -1902,6 +1902,207 @@ LIMIT 10";
             AppLogger.Error("FinOps", $"Recommendation check failed (Maintenance window): {ex.Message}");
         }
 
+        // 12. VM right-sizing — prescriptive core/memory targets (from DuckDB)
+        try
+        {
+            var vmUtil = await GetUtilizationEfficiencyAsync(serverId);
+            if (vmUtil != null)
+            {
+                // CPU data comes from 24-hour window in GetUtilizationEfficiencyAsync.
+                // For a 7-day P95 we query DuckDB directly.
+                decimal p95Cpu7d = vmUtil.P95CpuPct;
+                int cpuCount = vmUtil.CpuCount;
+                int bpMb = vmUtil.BufferPoolMb;
+                int physMb = vmUtil.PhysicalMemoryMb;
+
+                // Try 7-day P95 from DuckDB for better accuracy
+                try
+                {
+                    using var cpuConn = await OpenConnectionAsync();
+                    using var cpuCmd = cpuConn.CreateCommand();
+                    cpuCmd.CommandText = @"
+SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY sqlserver_cpu_utilization) AS p95_cpu
+FROM v_cpu_utilization_stats
+WHERE server_id = $1
+AND   collection_time >= $2";
+                    cpuCmd.Parameters.Add(new DuckDBParameter { Value = serverId });
+                    cpuCmd.Parameters.Add(new DuckDBParameter { Value = DateTime.UtcNow.AddDays(-7) });
+
+                    using var cpuReader = await cpuCmd.ExecuteReaderAsync();
+                    if (await cpuReader.ReadAsync() && !cpuReader.IsDBNull(0))
+                    {
+                        p95Cpu7d = Convert.ToDecimal(cpuReader.GetValue(0));
+                    }
+                }
+                catch { /* fall back to 24-hour P95 */ }
+
+                // CPU prescription: only if >= 4 cores
+                if (cpuCount >= 4)
+                {
+                    int targetCores = 0;
+                    if (p95Cpu7d < 15)
+                        targetCores = Math.Max(2, cpuCount / 4);
+                    else if (p95Cpu7d < 30)
+                        targetCores = Math.Max(2, cpuCount / 2);
+
+                    if (targetCores > 0 && targetCores < cpuCount)
+                    {
+                        recommendations.Add(new RecommendationRow
+                        {
+                            Category = "Hardware",
+                            Severity = "Medium",
+                            Confidence = "Medium",
+                            Finding = $"CPU: reduce from {cpuCount} to {targetCores} cores (P95 CPU {p95Cpu7d:N1}%)",
+                            Detail = $"Over the last 7 days, P95 CPU utilization was {p95Cpu7d:N1}%. " +
+                                     $"Current allocation of {cpuCount} cores can safely be reduced to {targetCores} cores.",
+                            EstMonthlySavings = monthlyCost > 0
+                                ? monthlyCost * (1m - (decimal)targetCores / cpuCount) * 0.50m
+                                : null
+                        });
+                    }
+                }
+
+                // Memory prescription: only if >= 4096 MB
+                if (physMb >= 4096 && physMb > 0)
+                {
+                    var bpRatio = (decimal)bpMb / physMb;
+                    int targetMb = 0;
+                    if (bpRatio < 0.25m)
+                        targetMb = Math.Max(4096, physMb / 4);
+                    else if (bpRatio < 0.40m)
+                        targetMb = Math.Max(4096, physMb / 2);
+
+                    if (targetMb > 0 && targetMb < physMb)
+                    {
+                        recommendations.Add(new RecommendationRow
+                        {
+                            Category = "Hardware",
+                            Severity = "Medium",
+                            Confidence = "Medium",
+                            Finding = $"Memory: reduce from {physMb / 1024}GB to {targetMb / 1024}GB (buffer pool uses {bpRatio:P0})",
+                            Detail = $"Buffer pool is using {bpMb:N0} MB of {physMb:N0} MB physical RAM ({bpRatio:P0}). " +
+                                     $"Reducing to {targetMb / 1024}GB would still leave headroom.",
+                            EstMonthlySavings = monthlyCost > 0
+                                ? monthlyCost * (1m - (decimal)targetMb / physMb) * 0.30m
+                                : null
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("FinOps", $"Recommendation check failed (VM right-sizing): {ex.Message}");
+        }
+
+        // 13. Storage tier optimization — flag databases with low IO latency (from DuckDB)
+        try
+        {
+            using var ioConn = await OpenConnectionAsync();
+            using var ioCmd = ioConn.CreateCommand();
+            ioCmd.CommandText = @"
+SELECT
+    database_name,
+    SUM(delta_reads) AS total_reads,
+    SUM(delta_stall_read_ms) AS total_stall_read_ms,
+    SUM(delta_writes) AS total_writes,
+    SUM(delta_stall_write_ms) AS total_stall_write_ms
+FROM file_io_stats
+WHERE server_id = $1
+AND   collection_time >= $2
+AND   delta_reads > 0
+GROUP BY database_name
+HAVING SUM(delta_reads) > 1000";
+            ioCmd.Parameters.Add(new DuckDBParameter { Value = serverId });
+            ioCmd.Parameters.Add(new DuckDBParameter { Value = DateTime.UtcNow.AddDays(-7) });
+
+            var lowLatencyDbs = new List<(string Name, decimal AvgReadMs, decimal AvgWriteMs)>();
+            using var ioReader = await ioCmd.ExecuteReaderAsync();
+            while (await ioReader.ReadAsync())
+            {
+                var dbName = ioReader.IsDBNull(0) ? "" : ioReader.GetString(0);
+                var totalReads = ioReader.IsDBNull(1) ? 0L : Convert.ToInt64(ioReader.GetValue(1));
+                var totalStallRead = ioReader.IsDBNull(2) ? 0L : Convert.ToInt64(ioReader.GetValue(2));
+                var totalWrites = ioReader.IsDBNull(3) ? 0L : Convert.ToInt64(ioReader.GetValue(3));
+                var totalStallWrite = ioReader.IsDBNull(4) ? 0L : Convert.ToInt64(ioReader.GetValue(4));
+
+                var avgReadMs = totalReads > 0 ? (decimal)totalStallRead / totalReads : 0m;
+                var avgWriteMs = totalWrites > 0 ? (decimal)totalStallWrite / totalWrites : 0m;
+
+                if (avgReadMs < 5m && avgWriteMs < 3m)
+                {
+                    lowLatencyDbs.Add((dbName, avgReadMs, avgWriteMs));
+                }
+            }
+
+            if (lowLatencyDbs.Count > 0)
+            {
+                var detail = string.Join("; ", lowLatencyDbs.Take(10)
+                    .Select(d => $"{d.Name} (read {d.AvgReadMs:N1}ms, write {d.AvgWriteMs:N1}ms)"));
+                recommendations.Add(new RecommendationRow
+                {
+                    Category = "Storage",
+                    Severity = "Low",
+                    Confidence = "Medium",
+                    Finding = $"{lowLatencyDbs.Count} database(s) with low IO latency — standard storage may suffice",
+                    Detail = $"These databases have avg read latency under 5ms and write under 3ms over 7 days: {detail}" +
+                             (lowLatencyDbs.Count > 10 ? $" and {lowLatencyDbs.Count - 10} more" : "") +
+                             ". Premium/high-performance storage may not be needed."
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("FinOps", $"Recommendation check failed (Storage tier): {ex.Message}");
+        }
+
+        // 14. Reserved capacity candidates — stable CPU utilization (from DuckDB)
+        try
+        {
+            using var rcConn = await OpenConnectionAsync();
+            using var rcCmd = rcConn.CreateCommand();
+            rcCmd.CommandText = @"
+SELECT
+    AVG(sqlserver_cpu_utilization) AS avg_cpu,
+    STDDEV(sqlserver_cpu_utilization) AS stddev_cpu,
+    COUNT(*) AS sample_count
+FROM cpu_utilization_stats
+WHERE server_id = $1
+AND   collection_time >= $2
+HAVING COUNT(*) >= 24";
+            rcCmd.Parameters.Add(new DuckDBParameter { Value = serverId });
+            rcCmd.Parameters.Add(new DuckDBParameter { Value = DateTime.UtcNow.AddDays(-7) });
+
+            using var rcReader = await rcCmd.ExecuteReaderAsync();
+            if (await rcReader.ReadAsync() && !rcReader.IsDBNull(0))
+            {
+                var avgCpu = Convert.ToDecimal(rcReader.GetValue(0));
+                var stddevCpu = rcReader.IsDBNull(1) ? 0m : Convert.ToDecimal(rcReader.GetValue(1));
+
+                if (avgCpu > 20 && stddevCpu > 0)
+                {
+                    var cv = stddevCpu / avgCpu;
+                    if (cv < 0.3m)
+                    {
+                        var confidence = cv < 0.15m ? "High" : "Medium";
+                        recommendations.Add(new RecommendationRow
+                        {
+                            Category = "Cloud",
+                            Severity = "Low",
+                            Confidence = confidence,
+                            Finding = $"Stable CPU utilization (avg {avgCpu:N1}%, CV {cv:N2}) — reserved capacity candidate",
+                            Detail = $"CPU utilization is consistently {avgCpu:N1}% with low variance (\u00b1{stddevCpu:N1}%). " +
+                                     "Reserved pricing typically saves 30-40% over pay-as-you-go for predictable workloads."
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("FinOps", $"Recommendation check failed (Reserved capacity): {ex.Message}");
+        }
+
         return recommendations;
     }
 
