@@ -425,7 +425,12 @@ END;";
                     Console.WriteLine("Connection successful!");
 
                     /*Capture SQL Server version for summary report*/
-                    using (var versionCmd = new SqlCommand("SELECT @@VERSION, SERVERPROPERTY('Edition');", connection))
+                    using (var versionCmd = new SqlCommand(@"
+                        SELECT
+                            @@VERSION,
+                            SERVERPROPERTY('Edition'),
+                            CONVERT(int, SERVERPROPERTY('EngineEdition')),
+                            SERVERPROPERTY('ProductMajorVersion');", connection))
                     {
                         using (var reader = await versionCmd.ExecuteReaderAsync().ConfigureAwait(false))
                         {
@@ -433,6 +438,29 @@ END;";
                             {
                                 sqlServerVersion = reader.GetString(0);
                                 sqlServerEdition = reader.GetString(1);
+
+                                var engineEdition = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+                                var majorVersion = reader.IsDBNull(3) ? 0 : int.TryParse(reader.GetValue(3).ToString(), out var v) ? v : 0;
+
+                                /*Check minimum SQL Server version — 2016+ required for on-prem (Standard/Enterprise).
+                                  Azure MI (EngineEdition 8) is always current, skip the check.*/
+                                if (engineEdition is not 8 && majorVersion > 0 && majorVersion < 13)
+                                {
+                                    string versionName = majorVersion switch
+                                    {
+                                        11 => "SQL Server 2012",
+                                        12 => "SQL Server 2014",
+                                        _ => $"SQL Server (version {majorVersion})"
+                                    };
+                                    Console.WriteLine();
+                                    Console.WriteLine($"ERROR: {versionName} is not supported.");
+                                    Console.WriteLine("Performance Monitor requires SQL Server 2016 (13.x) or later.");
+                                    if (!automatedMode)
+                                    {
+                                        WaitForExit();
+                                    }
+                                    return ExitCodes.VersionCheckFailed;
+                                }
                             }
                         }
                     }

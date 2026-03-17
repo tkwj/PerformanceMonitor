@@ -343,6 +343,62 @@ public class AdversarialTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// TestConnectionAsync must report the SQL Server version so the installer
+    /// can reject unsupported versions before running any scripts.
+    /// Verifies IsSupportedVersion returns true for sql2022 (on-prem, version 16).
+    /// </summary>
+    [Fact]
+    public async Task VersionCheck_Sql2022_IsSupported()
+    {
+        var info = await InstallationService.TestConnectionAsync(
+            TestDatabaseHelper.GetConnectionString());
+
+        Assert.True(info.IsConnected);
+        Assert.True(info.ProductMajorVersion >= 13,
+            $"Expected ProductMajorVersion >= 13, got {info.ProductMajorVersion}");
+        Assert.True(info.IsSupportedVersion);
+        Assert.True(info.EngineEdition is 2 or 3,
+            $"Expected Standard (2) or Enterprise (3), got {info.EngineEdition}");
+    }
+
+    /// <summary>
+    /// IsSupportedVersion must return false for old SQL Server versions.
+    /// We can't connect to an old server in tests, so test the logic directly.
+    /// </summary>
+    [Fact]
+    public void VersionCheck_OldVersion_IsNotSupported()
+    {
+        var info = new ServerInfo
+        {
+            IsConnected = true,
+            EngineEdition = 3, // Enterprise
+            ProductMajorVersion = 12 // SQL Server 2014
+        };
+        Assert.False(info.IsSupportedVersion);
+        Assert.Equal("SQL Server 2014", info.ProductMajorVersionName);
+
+        info.ProductMajorVersion = 11; // SQL Server 2012
+        Assert.False(info.IsSupportedVersion);
+        Assert.Equal("SQL Server 2012", info.ProductMajorVersionName);
+    }
+
+    /// <summary>
+    /// Azure MI (EngineEdition 8) should always be considered supported
+    /// regardless of what ProductMajorVersion reports.
+    /// </summary>
+    [Fact]
+    public void VersionCheck_AzureMI_AlwaysSupported()
+    {
+        var info = new ServerInfo
+        {
+            IsConnected = true,
+            EngineEdition = 8,
+            ProductMajorVersion = 0 // Even if unknown
+        };
+        Assert.True(info.IsSupportedVersion);
+    }
+
+    /// <summary>
     /// Version detection when database exists but connection is to wrong server/port.
     /// GUI silently returns null (potential data-loss vector) — verify this behavior
     /// is documented even if not fixed yet.

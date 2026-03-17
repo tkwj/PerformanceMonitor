@@ -267,6 +267,21 @@ namespace PerformanceMonitorInstallerGui
                         LogMessage($"Version: {versionLines[0]}", "Info");
                     }
 
+                    /*Check minimum SQL Server version (2016+ required for on-prem)*/
+                    if (!_serverInfo.IsSupportedVersion)
+                    {
+                        LogMessage($"{_serverInfo.ProductMajorVersionName} is not supported. SQL Server 2016 or later is required.", "Error");
+                        InstallButton.IsEnabled = false;
+                        MessageBox.Show(this,
+                            $"{_serverInfo.ProductMajorVersionName} is not supported.\n\n" +
+                            $"Performance Monitor requires SQL Server 2016 (13.x) or later.\n" +
+                            $"Server: {_serverInfo.ServerName}",
+                            "Unsupported SQL Server Version",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                        return;
+                    }
+
                     /*Check for installed version*/
                     _installedVersion = await InstallationService.GetInstalledVersionAsync(_connectionString);
                     if (_installedVersion != null)

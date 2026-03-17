@@ -42,6 +42,31 @@ namespace PerformanceMonitorInstallerGui.Services
         public string SqlServerEdition { get; set; } = string.Empty;
         public bool IsConnected { get; set; }
         public string? ErrorMessage { get; set; }
+        public int EngineEdition { get; set; }
+        public int ProductMajorVersion { get; set; }
+
+        /// <summary>
+        /// Returns true if the SQL Server version is supported (2016+).
+        /// Only checked for on-prem Standard (2) and Enterprise (3).
+        /// Azure MI (8) is always current and skips the check.
+        /// </summary>
+        public bool IsSupportedVersion =>
+            EngineEdition is 8 || ProductMajorVersion >= 13;
+
+        /// <summary>
+        /// Human-readable version name for error messages.
+        /// </summary>
+        public string ProductMajorVersionName => ProductMajorVersion switch
+        {
+            11 => "SQL Server 2012",
+            12 => "SQL Server 2014",
+            13 => "SQL Server 2016",
+            14 => "SQL Server 2017",
+            15 => "SQL Server 2019",
+            16 => "SQL Server 2022",
+            17 => "SQL Server 2025",
+            _ => $"SQL Server (version {ProductMajorVersion})"
+        };
     }
 
     /// <summary>
@@ -149,7 +174,13 @@ namespace PerformanceMonitorInstallerGui.Services
 
                 info.IsConnected = true;
 
-                using var command = new SqlCommand("SELECT @@VERSION, SERVERPROPERTY('Edition'), @@SERVERNAME;", connection);
+                using var command = new SqlCommand(@"
+                    SELECT
+                        @@VERSION,
+                        SERVERPROPERTY('Edition'),
+                        @@SERVERNAME,
+                        CONVERT(int, SERVERPROPERTY('EngineEdition')),
+                        SERVERPROPERTY('ProductMajorVersion');", connection);
                 using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
                 if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -157,6 +188,8 @@ namespace PerformanceMonitorInstallerGui.Services
                     info.SqlServerVersion = reader.GetString(0);
                     info.SqlServerEdition = reader.GetString(1);
                     info.ServerName = reader.GetString(2);
+                    info.EngineEdition = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
+                    info.ProductMajorVersion = reader.IsDBNull(4) ? 0 : int.TryParse(reader.GetValue(4).ToString(), out var v) ? v : 0;
                 }
             }
             catch (Exception ex)
