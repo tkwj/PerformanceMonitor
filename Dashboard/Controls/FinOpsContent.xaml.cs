@@ -145,6 +145,7 @@ namespace PerformanceMonitorDashboard.Controls
             {
                 var data = await _databaseService.GetFinOpsRecommendationsAsync(_currentServerMonthlyCost);
                 RecommendationsDataGrid.ItemsSource = data;
+                RecommendationsDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 RecommendationsNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 RecommendationsCountIndicator.Text = data.Count > 0 ? $"{data.Count} recommendation(s)" : "";
             }
@@ -366,6 +367,7 @@ namespace PerformanceMonitorDashboard.Controls
                 var hoursBack = GetResourceUsageHoursBack();
                 var data = await _databaseService.GetFinOpsDatabaseResourceUsageAsync(hoursBack);
                 DatabaseResourcesDataGrid.ItemsSource = data;
+                DatabaseResourcesDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 DatabaseResourcesNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 DbResourcesCountIndicator.Text = data.Count > 0 ? $"{data.Count} database(s)" : "";
             }
@@ -387,6 +389,7 @@ namespace PerformanceMonitorDashboard.Controls
             {
                 var data = await _databaseService.GetFinOpsStorageGrowthAsync();
                 StorageGrowthDataGrid.ItemsSource = data;
+                StorageGrowthDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 StorageGrowthNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 StorageGrowthCountIndicator.Text = data.Count > 0 ? $"{data.Count} database(s)" : "";
             }
@@ -491,6 +494,7 @@ namespace PerformanceMonitorDashboard.Controls
                 }
 
                 WaitCategorySummaryDataGrid.ItemsSource = data;
+                WaitCategorySummaryDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 WaitCategorySummaryNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             catch (Exception ex)
@@ -525,6 +529,7 @@ namespace PerformanceMonitorDashboard.Controls
                 }
 
                 ExpensiveQueriesDataGrid.ItemsSource = data;
+                ExpensiveQueriesDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 ExpensiveQueriesNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 ExpensiveQueriesCountIndicator.Text = data.Count > 0 ? $"{data.Count} query(s)" : "";
             }
@@ -542,6 +547,7 @@ namespace PerformanceMonitorDashboard.Controls
             {
                 var data = await _databaseService.GetFinOpsMemoryGrantEfficiencyAsync();
                 MemoryGrantEfficiencyDataGrid.ItemsSource = data;
+                MemoryGrantEfficiencyDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 MemoryGrantEfficiencyNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             catch (Exception ex)
@@ -765,6 +771,7 @@ namespace PerformanceMonitorDashboard.Controls
                 var hoursBack = GetHighImpactHoursBack();
                 var data = await _databaseService.GetFinOpsHighImpactQueriesAsync(hoursBack);
                 HighImpactDataGrid.ItemsSource = data;
+                HighImpactDataGrid.Visibility = data.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 HighImpactNoDataMessage.Visibility = data.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 HighImpactCountIndicator.Text = data.Count > 0 ? $"{data.Count} high-impact query(s)" : "";
             }
