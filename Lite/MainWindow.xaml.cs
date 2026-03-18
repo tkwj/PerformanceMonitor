@@ -840,6 +840,47 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
+    private void ImportConnectionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Select Previous Lite Install Folder"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        var serversJsonPath = System.IO.Path.Combine(dialog.FolderName, "config", "servers.json");
+        if (!System.IO.File.Exists(serversJsonPath))
+        {
+            MessageBox.Show(
+                "No config\\servers.json found in the selected folder.\n\nSelect the root folder of a previous Lite installation.",
+                "Import Connections",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            var (imported, skipped) = _serverManager.ImportServersFromFile(serversJsonPath);
+
+            var message = $"Imported {imported} server connection(s).";
+            if (skipped > 0)
+                message += $"\nSkipped {skipped} duplicate(s) (already configured).";
+            if (imported > 0)
+                message += "\n\nCredentials from the previous install are preserved.\nIf any connections fail to authenticate, re-enter the password in Manage Servers.";
+
+            MessageBox.Show(message, "Import Connections", MessageBoxButton.OK, MessageBoxImage.Information);
+
+            if (imported > 0)
+                RefreshServerList();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to import connections: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private async void ImportDataButton_Click(object sender, RoutedEventArgs e)
     {
         /* Open folder browser to select the old Lite install directory */

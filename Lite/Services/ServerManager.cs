@@ -511,6 +511,60 @@ public class ServerManager
     }
 
     /// <summary>
+    /// Imports server connections from an external servers.json file.
+    /// Upserts by ServerName — existing servers are skipped, new ones are added
+    /// with their original GUIDs so Credential Manager entries still resolve.
+    /// Returns (imported count, skipped count).
+    /// </summary>
+    public (int Imported, int Skipped) ImportServersFromFile(string serversJsonPath)
+    {
+        if (!File.Exists(serversJsonPath))
+            throw new FileNotFoundException("servers.json not found", serversJsonPath);
+
+        var json = File.ReadAllText(serversJsonPath);
+        var config = JsonSerializer.Deserialize<ServersConfig>(json);
+        var importedServers = config?.Servers ?? [];
+
+        int imported = 0;
+        int skipped = 0;
+
+        lock (_serversLock)
+        {
+            foreach (var server in importedServers)
+            {
+                // Skip if we already have a server with the same name
+                var existing = _servers.FirstOrDefault(s =>
+                    string.Equals(s.ServerName, server.ServerName, StringComparison.OrdinalIgnoreCase) &&
+                    s.ReadOnlyIntent == server.ReadOnlyIntent);
+
+                if (existing != null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                // Also skip if the same GUID already exists (shouldn't happen, but defensive)
+                if (_servers.Any(s => s.Id == server.Id))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                // Add with original GUID so Credential Manager entries still work
+                _servers.Add(server);
+                _connectionStatuses[server.Id] = new ServerConnectionStatus { ServerId = server.Id };
+                imported++;
+            }
+
+            if (imported > 0)
+                SaveServers();
+        }
+
+        _logger?.LogInformation("Imported {Imported} servers, skipped {Skipped} duplicates", imported, skipped);
+        return (imported, skipped);
+    }
+
+    /// <summary>
     /// Saves servers to the JSON config file.
     /// </summary>
     private void SaveServers()
