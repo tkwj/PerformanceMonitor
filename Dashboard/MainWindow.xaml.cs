@@ -151,6 +151,7 @@ namespace PerformanceMonitorDashboard
             // Sync preferences
             var startupPrefs = _preferencesService.GetPreferences();
             TabHelpers.CsvSeparator = startupPrefs.CsvSeparator;
+            MuteRuleDialog.DefaultExpiration = startupPrefs.MuteRuleDefaultExpiration;
             if (Enum.TryParse<Helpers.TimeDisplayMode>(startupPrefs.TimeDisplayMode, out var tdm))
                 Helpers.ServerTimeHelper.CurrentDisplayMode = tdm;
 
@@ -176,9 +177,34 @@ namespace PerformanceMonitorDashboard
         {
             try
             {
+                await Task.Delay(5000); // Don't slow down startup
+
                 var prefs = _preferencesService.GetPreferences();
                 if (!prefs.CheckForUpdatesOnStartup) return;
 
+                // Try Velopack first (supports download + apply)
+                try
+                {
+                    var mgr = new Velopack.UpdateManager(
+                        new Velopack.Sources.GithubSource(
+                            "https://github.com/erikdarlingdata/PerformanceMonitor", null, false));
+
+                    var newVersion = await mgr.CheckForUpdatesAsync();
+                    if (newVersion != null)
+                    {
+                        _notificationService?.ShowNotification(
+                            "Update Available",
+                            $"Performance Monitor {newVersion.TargetFullRelease.Version} is available. Use Help > About to download and install.",
+                            NotificationType.Info);
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Velopack packages may not exist yet — fall through to legacy check
+                }
+
+                // Fallback: GitHub Releases API check (notification only)
                 var result = await UpdateCheckService.CheckForUpdateAsync();
                 if (result?.IsUpdateAvailable == true)
                 {
@@ -1629,7 +1655,7 @@ namespace PerformanceMonitorDashboard
         private static string Truncate(string text, int maxLength = 300)
         {
             if (string.IsNullOrEmpty(text)) return "";
-            text = text.Trim();
+            text = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
             return text.Length <= maxLength ? text : text.Substring(0, maxLength) + "...";
         }
 

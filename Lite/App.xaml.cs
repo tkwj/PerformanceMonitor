@@ -76,6 +76,7 @@ public partial class App : Application
     public static int AlertLongRunningJobMultiplier { get; set; } = 3;
     public static int AlertCooldownMinutes { get; set; } = 5;  // Tray notification cooldown between repeated alerts
     public static int EmailCooldownMinutes { get; set; } = 15; // Email cooldown between repeated alerts
+    public static string MuteRuleDefaultExpiration { get; set; } = "24 hours"; // Default expiration for new mute rules
 
     /* Connection settings */
     public static int ConnectionTimeoutSeconds { get; set; } = 5;
@@ -166,18 +167,19 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // Initialize paths - use executable directory for portability
-        var exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        DataDirectory = exeDirectory;
-        ConfigDirectory = Path.Combine(exeDirectory, "config");
-        DatabasePath = Path.Combine(exeDirectory, "monitor.duckdb");
-        ArchiveDirectory = Path.Combine(exeDirectory, "archive");
+        // Initialize paths — store data in %LOCALAPPDATA% so Velopack updates
+        // can replace the app directory without losing data
+        var appDataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PerformanceMonitorLite");
+        DataDirectory = appDataRoot;
+        ConfigDirectory = Path.Combine(appDataRoot, "config");
+        DatabasePath = Path.Combine(appDataRoot, "monitor.duckdb");
+        ArchiveDirectory = Path.Combine(appDataRoot, "archive");
 
         // Ensure directories exist
-        if (!Directory.Exists(ConfigDirectory))
-        {
-            Directory.CreateDirectory(ConfigDirectory);
-        }
+        Directory.CreateDirectory(ConfigDirectory);
+        Directory.CreateDirectory(Path.Combine(appDataRoot, "archive"));
 
         // Load settings
         LoadDefaultTimeRange();
@@ -187,7 +189,7 @@ public partial class App : Application
         Helpers.ThemeManager.Apply(ColorTheme);
 
         // Initialize logging
-        var logDirectory = Path.Combine(exeDirectory, "logs");
+        var logDirectory = Path.Combine(appDataRoot, "logs");
         AppLogger.Initialize(logDirectory);
         Helpers.MethodProfiler.Initialize(logDirectory);
         Helpers.QueryLogger.Initialize(logDirectory);
@@ -198,6 +200,10 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        // Create and show main window (StartupUri removed for Velopack custom Main)
+        var mainWindow = new MainWindow();
+        mainWindow.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -272,6 +278,12 @@ public partial class App : Application
             if (root.TryGetProperty("alert_long_running_job_multiplier", out v)) AlertLongRunningJobMultiplier = v.GetInt32();
             if (root.TryGetProperty("alert_cooldown_minutes", out v)) AlertCooldownMinutes = (int)Math.Clamp(v.GetInt64(), 1, 120);
             if (root.TryGetProperty("email_cooldown_minutes", out v)) EmailCooldownMinutes = (int)Math.Clamp(v.GetInt64(), 1, 120);
+            if (root.TryGetProperty("mute_rule_default_expiration", out v))
+            {
+                var exp = v.GetString();
+                if (exp is "1 hour" or "24 hours" or "7 days" or "Never")
+                    MuteRuleDefaultExpiration = exp;
+            }
 
             /* Connection settings */
             if (root.TryGetProperty("connection_timeout_seconds", out v))
