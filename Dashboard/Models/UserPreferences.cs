@@ -117,6 +117,16 @@ namespace PerformanceMonitorDashboard.Models
         public string SmtpFromAddress { get; set; } = "";
         public string SmtpRecipients { get; set; } = "";
 
+        // Teams webhook settings
+        public bool TeamsWebhookEnabled { get; set; } = false;
+        public string TeamsWebhookUrl { get; set; } = "";
+        public string TeamsProxyAddress { get; set; } = "";
+
+        // Slack webhook settings
+        public bool SlackWebhookEnabled { get; set; } = false;
+        public string SlackWebhookUrl { get; set; } = "";
+        public string SlackProxyAddress { get; set; } = "";
+
         // MCP server settings
         public bool McpEnabled { get; set; } = false;
         public int McpPort { get; set; } = 5150;

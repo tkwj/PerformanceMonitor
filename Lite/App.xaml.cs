@@ -103,6 +103,16 @@ public partial class App : Application
     /* Update check settings */
     public static bool CheckForUpdatesOnStartup { get; set; } = true;
 
+    /* Teams webhook settings */
+    public static bool TeamsWebhookEnabled { get; set; } = false;
+    public static string TeamsWebhookUrl { get; set; } = "";
+    public static string TeamsProxyAddress { get; set; } = "";
+
+    /* Slack webhook settings */
+    public static bool SlackWebhookEnabled { get; set; } = false;
+    public static string SlackWebhookUrl { get; set; } = "";
+    public static string SlackProxyAddress { get; set; } = "";
+
     /* SMTP email alert settings */
     public static bool SmtpEnabled { get; set; } = false;
     public static string SmtpServer { get; set; } = "";
@@ -325,6 +335,16 @@ public partial class App : Application
 
             /* Update check settings */
             if (root.TryGetProperty("check_for_updates_on_startup", out v)) CheckForUpdatesOnStartup = v.GetBoolean();
+
+            /* Teams webhook settings */
+            if (root.TryGetProperty("teams_webhook_enabled", out v)) TeamsWebhookEnabled = v.GetBoolean();
+            if (root.TryGetProperty("teams_webhook_url", out v)) TeamsWebhookUrl = v.GetString() ?? "";
+            if (root.TryGetProperty("teams_proxy_address", out v)) TeamsProxyAddress = v.GetString() ?? "";
+
+            /* Slack webhook settings */
+            if (root.TryGetProperty("slack_webhook_enabled", out v)) SlackWebhookEnabled = v.GetBoolean();
+            if (root.TryGetProperty("slack_webhook_url", out v)) SlackWebhookUrl = v.GetString() ?? "";
+            if (root.TryGetProperty("slack_proxy_address", out v)) SlackProxyAddress = v.GetString() ?? "";
 
             /* SMTP settings */
             if (root.TryGetProperty("smtp_enabled", out v)) SmtpEnabled = v.GetBoolean();
