@@ -266,6 +266,14 @@ public partial class AlertsHistoryTab : UserControl
             }
             await LoadAlertsAsync();
         }
+        catch (TimeoutException)
+        {
+            MessageBox.Show(
+                "The database is currently busy (archival or maintenance in progress).\n\nPlease try again in a few moments.",
+                "Dismiss Unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
         catch (Exception ex)
         {
             AppLogger.Error("AlertsHistory", $"Failed to dismiss selected alerts: {ex.Message}");
@@ -315,6 +323,14 @@ public partial class AlertsHistoryTab : UserControl
                 AppLogger.Warn("AlertsHistory", $"Dismiss all: only {affected} of {liveCount} live alert(s) were updated");
             }
             await LoadAlertsAsync();
+        }
+        catch (TimeoutException)
+        {
+            MessageBox.Show(
+                "The database is currently busy (archival or maintenance in progress).\n\nPlease try again in a few moments.",
+                "Dismiss Unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {

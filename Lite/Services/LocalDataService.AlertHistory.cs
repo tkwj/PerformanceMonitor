@@ -102,7 +102,8 @@ LIMIT $2";
 
     /// <summary>
     /// Dismisses specific alerts by marking them as dismissed in DuckDB.
-    /// Identifies rows by (alert_time, server_id, metric_name) composite key.
+    /// Uses a single batched UPDATE with an exclusive write lock and transaction
+    /// to prevent race conditions with archival and ensure all-or-nothing semantics.
     /// </summary>
     public async Task<int> DismissAlertsAsync(List<AlertHistoryRow> alerts)
     {
@@ -111,43 +112,77 @@ LIMIT $2";
         if (App.LogAlertDismissals)
             AppLogger.Info("AlertDismiss", $"Dismissing {alerts.Count} selected alert(s)");
 
-        using var connection = await OpenConnectionAsync();
-        int totalAffected = 0;
+        using var connection = await OpenWriteConnectionAsync();
 
-        foreach (var alert in alerts)
+        using var beginCmd = connection.CreateCommand();
+        beginCmd.CommandText = "BEGIN TRANSACTION";
+        await beginCmd.ExecuteNonQueryAsync();
+
+        try
         {
+            // Build a single batched UPDATE using VALUES list
+            var valuesClauses = new System.Text.StringBuilder();
+            var parameters = new List<DuckDBParameter>();
+            for (int i = 0; i < alerts.Count; i++)
+            {
+                if (i > 0) valuesClauses.Append(", ");
+                var p1 = $"${i * 3 + 1}";
+                var p2 = $"${i * 3 + 2}";
+                var p3 = $"${i * 3 + 3}";
+                valuesClauses.Append($"({p1}, {p2}, {p3})");
+                parameters.Add(new DuckDBParameter { Value = alerts[i].AlertTime });
+                parameters.Add(new DuckDBParameter { Value = alerts[i].ServerId });
+                parameters.Add(new DuckDBParameter { Value = alerts[i].MetricName });
+            }
+
             using var command = connection.CreateCommand();
-            command.CommandText = @"
+            command.CommandText = $@"
 UPDATE config_alert_log
 SET    dismissed = TRUE
-WHERE  alert_time = $1
-AND    server_id = $2
-AND    metric_name = $3
-AND    dismissed = FALSE";
-            command.Parameters.Add(new DuckDBParameter { Value = alert.AlertTime });
-            command.Parameters.Add(new DuckDBParameter { Value = alert.ServerId });
-            command.Parameters.Add(new DuckDBParameter { Value = alert.MetricName });
-            var affected = await command.ExecuteNonQueryAsync();
-            totalAffected += affected;
+WHERE  dismissed = FALSE
+AND    (alert_time, server_id, metric_name) IN (VALUES {valuesClauses})";
+            foreach (var p in parameters)
+                command.Parameters.Add(p);
 
-            if (affected == 0 && App.LogAlertDismissals)
-                AppLogger.Warn("AlertDismiss", $"No rows updated for alert: time={alert.AlertTime:O}, server_id={alert.ServerId}, metric={alert.MetricName} — may be archived to parquet");
+            var totalAffected = await command.ExecuteNonQueryAsync();
+
+            using var commitCmd = connection.CreateCommand();
+            commitCmd.CommandText = "COMMIT";
+            await commitCmd.ExecuteNonQueryAsync();
+
+            if (totalAffected < alerts.Count && App.LogAlertDismissals)
+                AppLogger.Warn("AlertDismiss", $"Dismiss: {totalAffected} of {alerts.Count} alert(s) updated — {alerts.Count - totalAffected} may be archived to parquet");
+
+            if (App.LogAlertDismissals)
+                AppLogger.Info("AlertDismiss", $"Dismiss complete: {totalAffected} row(s) updated out of {alerts.Count} selected");
+            return totalAffected;
         }
-
-        if (App.LogAlertDismissals)
-            AppLogger.Info("AlertDismiss", $"Dismiss complete: {totalAffected} row(s) updated out of {alerts.Count} selected");
-        return totalAffected;
+        catch
+        {
+            try
+            {
+                using var rollbackCmd = connection.CreateCommand();
+                rollbackCmd.CommandText = "ROLLBACK";
+                await rollbackCmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception rbEx)
+            {
+                AppLogger.Error("AlertDismiss", $"Rollback failed: {rbEx.Message}");
+            }
+            throw;
+        }
     }
 
     /// <summary>
     /// Dismisses all visible (non-dismissed) alerts matching the current filter criteria.
+    /// Uses an exclusive write lock to prevent race conditions with archival.
     /// </summary>
     public async Task<int> DismissAllVisibleAlertsAsync(int hoursBack, int? serverId = null)
     {
         if (App.LogAlertDismissals)
             AppLogger.Info("AlertDismiss", $"Dismissing all visible alerts: hoursBack={hoursBack}, serverId={serverId?.ToString() ?? "all"}");
 
-        using var connection = await OpenConnectionAsync();
+        using var connection = await OpenWriteConnectionAsync();
         using var command = connection.CreateCommand();
 
         var cutoff = DateTime.UtcNow.AddHours(-hoursBack);
