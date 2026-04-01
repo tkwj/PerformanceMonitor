@@ -313,6 +313,24 @@ namespace PerformanceMonitorDashboard
             return (connected, errorMessage, mfaCancelled, serverVersion);
         }
 
+        private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
+        {
+            if (!ValidateInputs()) return;
+
+            CheckForUpdatesButton.IsEnabled = false;
+            CheckForUpdatesButton.Content = "Checking...";
+
+            try
+            {
+                await DetectDatabaseStatusAsync();
+            }
+            finally
+            {
+                CheckForUpdatesButton.IsEnabled = true;
+                CheckForUpdatesButton.Content = "Check for Updates";
+            }
+        }
+
         private async void TestConnection_Click(object sender, RoutedEventArgs e)
         {
             if (!ValidateInputs()) return;
