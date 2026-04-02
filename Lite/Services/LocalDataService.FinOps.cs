@@ -1569,11 +1569,18 @@ ORDER BY CAST(collection_time AS DATE)";
 
             if (edition.Contains("Enterprise", StringComparison.OrdinalIgnoreCase))
             {
-                using var featCmd = new SqlCommand(@"
-SELECT
-    DB_NAME(database_id) AS database_name,
-    feature_name
-FROM sys.dm_db_persisted_sku_features", sqlConn);
+                var hasDatabaseId = false;
+                using (var colCheck = new SqlCommand(
+                    "SELECT COL_LENGTH('sys.dm_db_persisted_sku_features', 'database_id')", sqlConn))
+                {
+                    colCheck.CommandTimeout = 10;
+                    hasDatabaseId = await colCheck.ExecuteScalarAsync() is not null and not DBNull;
+                }
+
+                var featSql = hasDatabaseId
+                    ? "SELECT DB_NAME(database_id) AS database_name, feature_name FROM sys.dm_db_persisted_sku_features"
+                    : "SELECT N'(unknown)' AS database_name, feature_name FROM sys.dm_db_persisted_sku_features";
+                using var featCmd = new SqlCommand(featSql, sqlConn);
                 featCmd.CommandTimeout = 30;
 
                 var features = new List<string>();
