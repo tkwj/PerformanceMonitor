@@ -83,7 +83,7 @@ ORDER BY bucket";
         return items;
     }
 
-    public async Task<List<QueryStatsRow>> GetTopQueriesByCpuAsync(int serverId, int hoursBack = 24, int top = 50, DateTime? fromDate = null, DateTime? toDate = null, int utcOffsetMinutes = 0)
+    public async Task<List<QueryStatsRow>> GetTopQueriesByCpuAsync(int serverId, int hoursBack = 24, int top = 50, DateTime? fromDate = null, DateTime? toDate = null, int utcOffsetMinutes = 0, string? databaseName = null)
     {
         using var _q = TimeQuery("GetTopQueriesByCpuAsync", "v_query_stats top N by CPU");
         using var connection = await OpenConnectionAsync();
@@ -92,47 +92,65 @@ ORDER BY bucket";
         var (startTime, endTime) = GetTimeRange(hoursBack, fromDate, toDate);
 
         command.CommandText = @"
+WITH ranked AS (
+    SELECT
+        database_name,
+        query_hash,
+        MAX(last_execution_time) AS last_execution_time,
+        MAX(creation_time) AS creation_time,
+        SUM(delta_execution_count) AS total_executions,
+        SUM(delta_worker_time) AS total_cpu_us,
+        SUM(delta_elapsed_time) AS total_elapsed_us,
+        SUM(delta_logical_reads) AS total_reads,
+        SUM(delta_rows) AS total_rows,
+        SUM(delta_logical_writes) AS total_writes,
+        SUM(delta_physical_reads) AS total_physical_reads,
+        SUM(delta_spills) AS total_spills,
+        MIN(min_dop) AS min_dop,
+        MAX(max_dop) AS max_dop,
+        MIN(min_worker_time) AS min_worker_time,
+        MAX(max_worker_time) AS max_worker_time,
+        MIN(min_elapsed_time) AS min_elapsed_time,
+        MAX(max_elapsed_time) AS max_elapsed_time,
+        MIN(min_physical_reads) AS min_physical_reads,
+        MAX(max_physical_reads) AS max_physical_reads,
+        MIN(min_rows) AS min_rows,
+        MAX(max_rows) AS max_rows,
+        MIN(min_grant_kb) AS min_grant_kb,
+        MAX(max_grant_kb) AS max_grant_kb,
+        MIN(min_spills) AS min_spills,
+        MAX(max_spills) AS max_spills,
+        MAX(query_plan_hash) AS query_plan_hash,
+        MAX(sql_handle) AS sql_handle,
+        MAX(plan_handle) AS plan_handle
+    FROM v_query_stats
+    WHERE server_id = $1
+    AND   collection_time >= $2
+    AND   collection_time <= $3
+    AND   last_execution_time >= $2 + $5 * INTERVAL '1' MINUTE
+    AND   ($6 IS NULL OR database_name = $6)
+    GROUP BY database_name, query_hash
+    HAVING SUM(delta_execution_count) > 0 OR SUM(delta_elapsed_time) > 0
+    ORDER BY SUM(delta_elapsed_time) DESC
+    LIMIT $4 + 5
+)
 SELECT
-    database_name,
-    query_hash,
-    MAX(last_execution_time) AS last_execution_time,
-    MAX(creation_time) AS creation_time,
-    SUM(delta_execution_count) AS total_executions,
-    SUM(delta_worker_time) AS total_cpu_us,
-    SUM(delta_elapsed_time) AS total_elapsed_us,
-    SUM(delta_logical_reads) AS total_reads,
-    SUM(delta_rows) AS total_rows,
-    SUM(delta_logical_writes) AS total_writes,
-    SUM(delta_physical_reads) AS total_physical_reads,
-    SUM(delta_spills) AS total_spills,
-    MIN(min_dop) AS min_dop,
-    MAX(max_dop) AS max_dop,
-    MIN(min_worker_time) AS min_worker_time,
-    MAX(max_worker_time) AS max_worker_time,
-    MIN(min_elapsed_time) AS min_elapsed_time,
-    MAX(max_elapsed_time) AS max_elapsed_time,
-    MIN(min_physical_reads) AS min_physical_reads,
-    MAX(max_physical_reads) AS max_physical_reads,
-    MIN(min_rows) AS min_rows,
-    MAX(max_rows) AS max_rows,
-    MIN(min_grant_kb) AS min_grant_kb,
-    MAX(max_grant_kb) AS max_grant_kb,
-    MIN(min_spills) AS min_spills,
-    MAX(max_spills) AS max_spills,
-    MAX(query_plan_hash) AS query_plan_hash,
-    MAX(sql_handle) AS sql_handle,
-    MAX(plan_handle) AS plan_handle,
-    MAX(query_text) AS query_text,
-    MAX(query_plan_xml) AS query_plan
-FROM v_query_stats
-WHERE server_id = $1
-AND   collection_time >= $2
-AND   collection_time <= $3
-AND   last_execution_time >= $2 + $5 * INTERVAL '1' MINUTE
-AND   query_text NOT LIKE 'WAITFOR%'
-GROUP BY database_name, query_hash
-HAVING SUM(delta_execution_count) > 0 OR SUM(delta_elapsed_time) > 0
-ORDER BY SUM(delta_elapsed_time) DESC
+    r.*,
+    t.query_text,
+    t.query_plan_xml AS query_plan
+FROM ranked r
+LEFT JOIN LATERAL (
+    SELECT query_text, query_plan_xml
+    FROM v_query_stats
+    WHERE server_id = $1
+    AND   query_hash = r.query_hash
+    AND   database_name = r.database_name
+    AND   query_text IS NOT NULL
+    ORDER BY collection_time DESC
+    LIMIT 1
+) t ON TRUE
+WHERE t.query_text IS NULL OR t.query_text NOT LIKE 'WAITFOR%'
+ORDER BY r.total_elapsed_us DESC
 LIMIT $4";
 
         command.Parameters.Add(new DuckDBParameter { Value = serverId });
@@ -140,6 +158,7 @@ LIMIT $4";
         command.Parameters.Add(new DuckDBParameter { Value = endTime });
         command.Parameters.Add(new DuckDBParameter { Value = top });
         command.Parameters.Add(new DuckDBParameter { Value = utcOffsetMinutes });
+        command.Parameters.Add(new DuckDBParameter { Value = (object?)databaseName ?? DBNull.Value });
 
         var items = new List<QueryStatsRow>();
         using var reader = await command.ExecuteReaderAsync();
@@ -599,7 +618,7 @@ ORDER BY bucket";
         return items;
     }
 
-    public async Task<List<ProcedureStatsRow>> GetTopProceduresByCpuAsync(int serverId, int hoursBack = 24, int top = 50, DateTime? fromDate = null, DateTime? toDate = null, int utcOffsetMinutes = 0)
+    public async Task<List<ProcedureStatsRow>> GetTopProceduresByCpuAsync(int serverId, int hoursBack = 24, int top = 50, DateTime? fromDate = null, DateTime? toDate = null, int utcOffsetMinutes = 0, string? databaseName = null)
     {
         using var _q = TimeQuery("GetTopProceduresByCpuAsync", "v_procedure_stats top N by CPU");
         using var connection = await OpenConnectionAsync();
@@ -641,6 +660,7 @@ WHERE server_id = $1
 AND   collection_time >= $2
 AND   collection_time <= $3
 AND   last_execution_time >= $2 + $5 * INTERVAL '1' MINUTE
+AND   ($6 IS NULL OR database_name = $6)
 GROUP BY database_name, schema_name, object_name, object_type
 HAVING SUM(delta_execution_count) > 0 OR SUM(delta_elapsed_time) > 0
 ORDER BY SUM(delta_elapsed_time) DESC
@@ -651,6 +671,7 @@ LIMIT $4";
         command.Parameters.Add(new DuckDBParameter { Value = endTime });
         command.Parameters.Add(new DuckDBParameter { Value = top });
         command.Parameters.Add(new DuckDBParameter { Value = utcOffsetMinutes });
+        command.Parameters.Add(new DuckDBParameter { Value = (object?)databaseName ?? DBNull.Value });
 
         var items = new List<ProcedureStatsRow>();
         using var reader = await command.ExecuteReaderAsync();
