@@ -375,6 +375,7 @@ namespace PerformanceMonitorDashboard
                 {
                     await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cts.Token);
                     if (cts.Token.IsCancellationRequested) break;
+                    if (_isRefreshing) continue;
 
                     try
                     {
@@ -383,6 +384,11 @@ namespace PerformanceMonitorDashboard
                         StatusText.Text = "Ready";
                         FooterText.Text = $"Last refresh: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Server: {_serverConnection.DisplayName}";
                         Logger.Info($"Auto-refresh completed in {sw.ElapsedMilliseconds}ms for {_serverConnection.DisplayName}");
+                    }
+                    catch (OperationCanceledException) when (!cts.Token.IsCancellationRequested)
+                    {
+                        // SQL query cancelled or timed out, but our loop CTS is still alive — keep going
+                        Logger.Error($"Auto-refresh query cancelled for {_serverConnection.DisplayName}, continuing loop");
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -393,13 +399,15 @@ namespace PerformanceMonitorDashboard
             }
             catch (OperationCanceledException)
             {
-                // Normal shutdown
+                Logger.Info($"Auto-refresh loop stopped for {_serverConnection.DisplayName}");
             }
         }
 
         private void ServerTab_Unloaded(object sender, RoutedEventArgs e)
         {
-            _autoRefreshCts?.Cancel();
+            // Don't cancel auto-refresh on tab switch — WPF fires Unloaded when
+            // a TabItem is deselected, not just when the control is destroyed.
+            // The loop is lightweight and should keep ticking in the background.
             _autoRefreshTimer?.Stop();
             _autoRefreshTimer = null;
 
