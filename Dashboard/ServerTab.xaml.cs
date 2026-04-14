@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows.Data;
 using System.Text;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -46,6 +47,7 @@ namespace PerformanceMonitorDashboard
 
         private readonly UserPreferencesService _preferencesService;
         private DispatcherTimer? _autoRefreshTimer;
+        private CancellationTokenSource? _autoRefreshCts;
         private bool _isRefreshing;
         private DateTime _refreshStartedUtc;
         private bool _suppressPickerUpdates;
@@ -127,7 +129,6 @@ namespace PerformanceMonitorDashboard
 
             InitializeDefaultTimeRanges();
             SetupChartContextMenus();
-            SetupAutoRefresh();
             SetupSubTabContextMenus();
 
             BlockingSlicer.RangeChanged += OnBlockingSlicerChanged;
@@ -343,30 +344,7 @@ namespace PerformanceMonitorDashboard
 
             if (prefs.AutoRefreshEnabled)
             {
-                _autoRefreshTimer = new DispatcherTimer
-                {
-                    Interval = TimeSpan.FromSeconds(prefs.AutoRefreshIntervalSeconds)
-                };
-                _autoRefreshTimer.Tick += async (s, e) =>
-                {
-                    _autoRefreshTimer?.Stop();
-                    try
-                    {
-                        await RefreshVisibleTabAsync();
-                        StatusText.Text = "Ready";
-                        FooterText.Text = $"Last refresh: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Server: {_serverConnection.DisplayName}";
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error($"Auto-refresh error: {ex.Message}", ex);
-                        StatusText.Text = "Auto-refresh error";
-                    }
-                    finally
-                    {
-                        _autoRefreshTimer?.Start();
-                    }
-                };
-                _autoRefreshTimer.Start();
+                StartAutoRefreshLoop(prefs.AutoRefreshIntervalSeconds);
                 AutoRefreshToggle.IsChecked = true;
                 AutoRefreshToggle.Content = $"Auto-Refresh: {prefs.AutoRefreshIntervalSeconds}s";
             }
@@ -377,8 +355,51 @@ namespace PerformanceMonitorDashboard
             }
         }
 
+        /// <summary>
+        /// Async loop that replaces DispatcherTimer for auto-refresh. Task.Delay is not
+        /// subject to Dispatcher priority starvation under heavy UI load (chart rendering,
+        /// data binding) that can indefinitely defer Background-priority DispatcherTimer ticks.
+        /// </summary>
+        private async void StartAutoRefreshLoop(int intervalSeconds)
+        {
+            if (_autoRefreshCts != null && !_autoRefreshCts.IsCancellationRequested)
+                return;
+
+            _autoRefreshCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _autoRefreshCts = cts;
+
+            try
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cts.Token);
+                    if (cts.Token.IsCancellationRequested) break;
+
+                    try
+                    {
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        await RefreshVisibleTabAsync();
+                        StatusText.Text = "Ready";
+                        FooterText.Text = $"Last refresh: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Server: {_serverConnection.DisplayName}";
+                        Logger.Info($"Auto-refresh completed in {sw.ElapsedMilliseconds}ms for {_serverConnection.DisplayName}");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Logger.Error($"Auto-refresh error: {ex.Message}", ex);
+                        StatusText.Text = "Auto-refresh error";
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown
+            }
+        }
+
         private void ServerTab_Unloaded(object sender, RoutedEventArgs e)
         {
+            _autoRefreshCts?.Cancel();
             _autoRefreshTimer?.Stop();
             _autoRefreshTimer = null;
 
@@ -448,7 +469,9 @@ namespace PerformanceMonitorDashboard
 
         public void RefreshAutoRefreshSettings()
         {
-            // Stop existing timer
+            // Stop existing loop and timer
+            _autoRefreshCts?.Cancel();
+            _autoRefreshCts = null;
             _autoRefreshTimer?.Stop();
             _autoRefreshTimer = null;
 
@@ -457,30 +480,7 @@ namespace PerformanceMonitorDashboard
 
             if (prefs.AutoRefreshEnabled)
             {
-                _autoRefreshTimer = new DispatcherTimer
-                {
-                    Interval = TimeSpan.FromSeconds(prefs.AutoRefreshIntervalSeconds)
-                };
-                _autoRefreshTimer.Tick += async (s, e) =>
-                {
-                    _autoRefreshTimer?.Stop();
-                    try
-                    {
-                        await RefreshVisibleTabAsync();
-                        StatusText.Text = "Ready";
-                        FooterText.Text = $"Last refresh: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Server: {_serverConnection.DisplayName}";
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error($"Auto-refresh error: {ex.Message}", ex);
-                        StatusText.Text = "Auto-refresh error";
-                    }
-                    finally
-                    {
-                        _autoRefreshTimer?.Start();
-                    }
-                };
-                _autoRefreshTimer.Start();
+                StartAutoRefreshLoop(prefs.AutoRefreshIntervalSeconds);
                 AutoRefreshToggle.IsChecked = true;
                 AutoRefreshToggle.Content = $"Auto-Refresh: {prefs.AutoRefreshIntervalSeconds}s";
             }
@@ -506,30 +506,7 @@ namespace PerformanceMonitorDashboard
                 prefs.AutoRefreshEnabled = true;
                 _preferencesService.SavePreferences(prefs);
 
-                _autoRefreshTimer = new DispatcherTimer
-                {
-                    Interval = TimeSpan.FromSeconds(prefs.AutoRefreshIntervalSeconds)
-                };
-                _autoRefreshTimer.Tick += async (s, args) =>
-                {
-                    _autoRefreshTimer?.Stop();
-                    try
-                    {
-                        await RefreshVisibleTabAsync();
-                        StatusText.Text = "Ready";
-                        FooterText.Text = $"Last refresh: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Server: {_serverConnection.DisplayName}";
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error($"Auto-refresh error: {ex.Message}", ex);
-                        StatusText.Text = "Auto-refresh error";
-                    }
-                    finally
-                    {
-                        _autoRefreshTimer?.Start();
-                    }
-                };
-                _autoRefreshTimer.Start();
+                StartAutoRefreshLoop(prefs.AutoRefreshIntervalSeconds);
                 AutoRefreshToggle.Content = $"Auto-Refresh: {prefs.AutoRefreshIntervalSeconds}s";
             }
             else
@@ -538,8 +515,7 @@ namespace PerformanceMonitorDashboard
                 prefs.AutoRefreshEnabled = false;
                 _preferencesService.SavePreferences(prefs);
 
-                _autoRefreshTimer?.Stop();
-                _autoRefreshTimer = null;
+                _autoRefreshCts?.Cancel();
                 AutoRefreshToggle.Content = "Auto-Refresh: Off";
             }
         }
@@ -643,6 +619,7 @@ namespace PerformanceMonitorDashboard
                 DefaultTraceTab.SetTimeRange(_globalHoursBack, _globalFromDate, _globalToDate);
 
                 await LoadDataAsync();
+                SetupAutoRefresh();
             }
             catch (Exception ex)
             {

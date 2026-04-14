@@ -99,7 +99,7 @@ Data starts flowing within 1–5 minutes. That's it. No installation on your ser
 
 **Upgrading from zip?** Click **Import Settings** then **Import Data** in the sidebar and point both at your old Lite folder. Settings imports server connections, alert thresholds, SMTP config, and schedules. Data imports historical DuckDB + Parquet archives. **Auto-update users** (installed via Setup.exe) get updates automatically — no manual import needed.
 
-**Always On AG?** Enable **ReadOnlyIntent** in the connection settings to route Lite's monitoring queries to a readable secondary, keeping the primary clear.
+**Always On AG?** Enable **ReadOnlyIntent** in the connection settings to route Lite's monitoring queries to a readable secondary, keeping the primary clear. Enable **MultiSubnetFailover** for multi-subnet failover scenarios.
 
 ### Lite Collectors
 
@@ -190,6 +190,8 @@ PerformanceMonitorInstaller.exe YourServerName sa YourPassword --uninstall
 ```
 
 The installer automatically tests the connection, checks the SQL Server version (2016+ required), executes SQL scripts, downloads community dependencies, creates SQL Agent jobs, and runs initial data collection. You can also install directly from the Dashboard's Add Server dialog.
+
+**Air-gapped environments?** Place pre-downloaded community scripts (`sp_WhoIsActive.sql`, `DarlingData.sql`, `Install-All-Scripts.sql`) in a `community/` directory next to the installer. The installer uses local files when present and falls back to GitHub downloads otherwise.
 
 ### CLI Installer Options
 
